@@ -1,6 +1,6 @@
 # ShanghaiTech GenAI
 
-将 ShanghaiTech GenAI 接入 DeepSeek Harness 的本地网关与 Windows 部署工具。当前版本为 **1.0.1**，配套插件适用于 **DSH Desktop 0.2.1-rc.2**。
+将 ShanghaiTech GenAI 接入 DeepSeek Harness 的本地网关与 Windows 部署工具。当前版本为 **1.0.2**，配套插件适用于 **DSH Desktop 0.2.1-rc.2**。
 
 网关提供模型列表、对话、联网搜索、Thinking 选项和网站附件接口；DSH 插件提供模型来源、会话选项及基于 Standard 的 Agent 预设。
 
@@ -37,6 +37,8 @@ powershell -ExecutionPolicy Bypass -File .\Start.ps1
 插件源码独立维护于 [dsh-shanghaitech-genai](https://github.com/Github-Anderson/dsh-shanghaitech-genai)，通过 `v1.0.1` Git 标签安装，不再随部署仓库提供压缩包。
 
 ## 本地配置
+
+开发者长期本地部署、插件打包及源码同步见 [本地开发环境](tools/README.md)。运行副本位于源码仓库外，修改代码后先同步再部署。
 
 `private/` 保存网关密钥、网站凭证和运行配置，已加入 Git 忽略规则。克隆仓库后运行 `Generate-Key.ps1` 重新生成自己的配置。网站凭证有效期结束后，需重新导出并导入。
 

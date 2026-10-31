@@ -15,10 +15,10 @@ try {
     for ($attempt = 0; $attempt -lt 20; $attempt++) {
         try {
             $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/healthz' -TimeoutSec 2
-            if ($health.product -eq 'ShanghaiTech GenAI' -and $health.version -eq '1.0.1') { $ready = $true; break }
+            if ($health.product -eq 'ShanghaiTech GenAI' -and $health.version -eq '1.0.2') { $ready = $true; break }
         } catch {}
         Start-Sleep -Seconds 1
     }
     if (-not $ready) { throw 'Gateway did not become ready. Check docker compose logs.' }
-    Write-Host 'ShanghaiTech GenAI v1.0.1: http://127.0.0.1:8000/'
+    Write-Host 'ShanghaiTech GenAI v1.0.2: http://127.0.0.1:8000/'
 } finally { Pop-Location }
