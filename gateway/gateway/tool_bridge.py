@@ -455,35 +455,20 @@ If a command is denied, report the real exit code and error. Do not use Start-Pr
                 system.append(tool_protocol + tool_catalog)
         if system:
             messages.insert(0, {'role': 'system', 'content': '\n\n'.join(system)})
-        # DSH appends runtime/skill/time context as consecutive user messages.
-        # The website takes only the last message as chatInfo. Group the whole
-        # user turn before attachment planning so indices and image limits are
-        # computed for the final layout, not remapped after uploads.
-        grouped = []
-        for message in messages:
-            if grouped and message['role'] == grouped[-1]['role'] == 'user':
-                previous = grouped[-1]['content']
-                current = message['content']
-                if isinstance(previous, str) and isinstance(current, str):
-                    grouped[-1] = {'role': 'user', 'content': previous + '\n\n' + current}
-                else:
-                    def parts(value):
-                        return [{'type': 'text', 'text': value}] if isinstance(value, str) else value
-                    if not isinstance(previous, (str, list)) or not isinstance(current, (str, list)):
-                        raise invalid('Expected text or content blocks in user messages.')
-                    grouped[-1] = {'role': 'user', 'content': parts(previous) + parts(current)}
-            else:
-                grouped.append(message)
-        if turn_protocol and grouped and grouped[-1]['role'] == 'user':
-            content = grouped[-1]['content']
+        # Consecutive user messages can be distinct human turns after a failed
+        # generation. Preserve their boundaries: only the final message becomes
+        # chatInfo/current imageUrls; older attachments belong to history.
+        # The DSH adapter already marks runtime/skill/time context as developer.
+        if turn_protocol and messages and messages[-1]['role'] == 'user':
+            content = messages[-1]['content']
             suffix = '\n\n' + turn_protocol
             if isinstance(content, str):
-                grouped[-1] = {'role': 'user', 'content': content + suffix}
+                messages[-1] = {'role': 'user', 'content': content + suffix}
             elif isinstance(content, list):
-                grouped[-1] = {'role': 'user', 'content': content + [{'type': 'text', 'text': suffix}]}
+                messages[-1] = {'role': 'user', 'content': content + [{'type': 'text', 'text': suffix}]}
             else:
                 raise invalid('Expected text or content blocks in user messages.')
-        result['messages'] = grouped
+        result['messages'] = messages
         return result
 
     @staticmethod

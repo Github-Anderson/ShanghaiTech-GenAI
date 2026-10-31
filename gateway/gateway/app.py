@@ -124,7 +124,11 @@ class Service:
             visible_output = False
             retry = False
             upstream = stream_upstream(self.client, payload, root_ai_type, token,
-                                       idle_timeout=self.settings.read_timeout_seconds, **({'timing': timing} if timing else {}))
+                                       idle_timeout=self.settings.read_timeout_seconds,
+                                       **({'header_timeout': max(self.settings.read_timeout_seconds,
+                                                                 self.settings.total_timeout_seconds)}
+                                          if payload_has_images(payload) else {}),
+                                       **({'timing': timing} if timing else {}))
             if timing:
                 timing.count('upstream_attempts')
             try:

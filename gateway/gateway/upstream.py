@@ -370,6 +370,7 @@ async def stream_upstream(
     idle_timeout: float = 90.0,
     tail_timeout: float = 1.0,
     timing=None,
+    header_timeout: float | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Yield normalised deltas, then one completion event; never retry POST.
 
@@ -392,8 +393,17 @@ async def stream_upstream(
     phase = 'response_headers'
     frame_count = text_chars = reasoning_chars = 0
     try:
+        # Vision preprocessing may finish before the site sends SSE headers.
+        # Extend that wait only; _event_data still enforces the idle timeout
+        # after headers, and Service.generate owns the absolute total deadline.
+        request_options = {}
+        if header_timeout is not None:
+            timeout = httpx.Timeout(client.timeout)
+            timeout.read = header_timeout
+            request_options['timeout'] = timeout
         async with client.stream(
-            "POST", CHAT_URL, json=payload, headers=headers, follow_redirects=False
+            "POST", CHAT_URL, json=payload, headers=headers, follow_redirects=False,
+            **request_options,
         ) as response:
             phase = 'stream'
             if timing:
