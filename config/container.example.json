@@ -18,7 +18,7 @@
       "display_name": "GPT-6.1-Sol",
       "net_go": false,
       "supports_search": true,
-      "supports_thinking": false
+      "supports_thinking": true
     },
     "GPT-6.1-Terra": {
       "enabled": true,
@@ -30,19 +30,19 @@
       "display_name": "GPT-6.1-Terra",
       "net_go": false,
       "supports_search": true,
-      "supports_thinking": false
+      "supports_thinking": true
     },
-    "GPT-6-Astra": {
+    "gpt-6-astra": {
       "enabled": true,
       "root_ai_type": "azure",
       "max_tokens": 16384,
       "enable_thinking": true,
       "thinking": false,
       "supports_images": true,
-      "display_name": "GPT-6-Astra",
+      "display_name": "gpt-6-astra",
       "net_go": false,
       "supports_search": true,
-      "supports_thinking": false
+      "supports_thinking": true
     },
     "GPT-6-Luna": {
       "enabled": true,
@@ -53,6 +53,28 @@
       "supports_images": true,
       "display_name": "GPT-6-Luna",
       "net_go": false,
+      "supports_search": true,
+      "supports_thinking": true
+    },
+    "chatglm": {
+      "supports_images": true,
+      "enabled": true,
+      "root_ai_type": "xinference",
+      "max_tokens": 16384,
+      "enable_thinking": false,
+      "net_go": false,
+      "display_name": "GLM-5.3-Flash",
+      "supports_search": true,
+      "supports_thinking": false
+    },
+    "qwen-instruct": {
+      "supports_images": true,
+      "enabled": true,
+      "root_ai_type": "xinference",
+      "max_tokens": 16384,
+      "enable_thinking": false,
+      "net_go": false,
+      "display_name": "Qwen-3.8",
       "supports_search": true,
       "supports_thinking": false
     },
@@ -79,28 +101,6 @@
       "net_go": false,
       "supports_search": true,
       "supports_thinking": true
-    },
-    "chatglm": {
-      "supports_images": true,
-      "enabled": true,
-      "root_ai_type": "xinference",
-      "max_tokens": 16384,
-      "enable_thinking": false,
-      "net_go": false,
-      "display_name": "GLM-5.3-Flash",
-      "supports_search": true,
-      "supports_thinking": false
-    },
-    "qwen-instruct": {
-      "supports_images": true,
-      "enabled": true,
-      "root_ai_type": "xinference",
-      "max_tokens": 16384,
-      "enable_thinking": false,
-      "net_go": false,
-      "display_name": "Qwen-3.8",
-      "supports_search": true,
-      "supports_thinking": false
     }
   }
 }
