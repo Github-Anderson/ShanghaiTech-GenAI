@@ -1,0 +1,15 @@
+# Allow only code, static UI, the public example config, and build requirements.
+**
+!Dockerfile
+!requirements.txt
+!gateway/
+!gateway/**/*.py
+!gateway/*.py
+!gateway/static/
+!gateway/static/**
+!config/
+!config/settings.example.json
+**/__pycache__/
+**/*.pyc
+**/.env
+**/local.json

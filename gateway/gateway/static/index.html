@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>ShanghaiTech GenAI</title>
+  <style>
+    :root { color-scheme: light; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: #172033; background: #f3f6fa; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    button, input, select, textarea { font: inherit; }
+    button { border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; color: #273449; padding: 10px 15px; cursor: pointer; }
+    button:hover:not(:disabled) { background: #eff4fb; border-color: #93a9c5; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    button.primary { background: #2259d6; border-color: #2259d6; color: #fff; }
+    button.primary:hover:not(:disabled) { background: #194ab9; }
+    button.stop { color: #b42318; border-color: #efc1bd; }
+    input, select, textarea { width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 12px; background: #fff; color: #172033; }
+    input:focus, select:focus, textarea:focus { outline: 2px solid #a8c1fa; outline-offset: 1px; }
+    label { display: block; font-size: 12px; color: #5b6a7f; }
+    label span { display: block; margin-bottom: 6px; }
+    .shell { max-width: 1440px; margin: 0 auto; padding: 26px; }
+    header { display: flex; gap: 14px; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+    h1 { font-size: 24px; letter-spacing: -.6px; margin: 0 0 7px; }
+    .badge { white-space: nowrap; background: #fff3d7; color: #885b00; border: 1px solid #f0d590; border-radius: 20px; font-size: 12px; padding: 7px 11px; }
+    .settings { display: grid; grid-template-columns: minmax(180px, 1.5fr) auto minmax(180px, 1fr) auto auto; align-items: end; gap: 12px; padding: 16px; border: 1px solid #dde5ef; background: #fff; border-radius: 12px; margin-bottom: 16px; }
+    .switch { display: flex; gap: 7px; align-items: center; white-space: nowrap; height: 42px; font-size: 13px; }
+    .switch input { width: auto; accent-color: #2259d6; }
+    [hidden] { display: none !important; }
+    .switch span { margin: 0; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(300px, 1fr); gap: 16px; align-items: start; }
+    .panel { background: #fff; border: 1px solid #dde5ef; border-radius: 12px; overflow: hidden; }
+    .panel-title { padding: 14px 18px; border-bottom: 1px solid #e7edf4; display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; }
+    .counter { color: #7a8799; font-size: 12px; font-weight: 400; }
+    .transcript { min-height: 330px; max-height: 58vh; overflow: auto; padding: 18px; scroll-behavior: smooth; }
+    .empty { color: #8592a4; text-align: center; padding: 105px 15px; font-size: 14px; }
+    .message { padding: 14px 15px; margin-bottom: 14px; border: 1px solid #e1e8f1; border-radius: 10px; background: #fff; }
+    .message.user { background: #f0f5ff; border-color: #dbe6fc; }
+    .message-label { font-size: 11px; letter-spacing: .5px; color: #6b7d96; font-weight: 600; margin-bottom: 8px; }
+    .message-body, .reasoning-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: 14px; line-height: 1.8; }
+    .message-state { color: #8b98a8; margin-top: 9px; font-size: 12px; }
+    .message-state.failed { color: #b42318; }
+    .reasoning { margin-bottom: 12px; padding: 10px 12px; background: #f6f7fa; border-radius: 7px; color: #667085; }
+    .reasoning-title { font-size: 11px; margin-bottom: 5px; }
+    .reasoning-body { font-size: 13px; }
+    .composer { padding: 16px; border-top: 1px solid #e7edf4; }
+    textarea { resize: vertical; min-height: 100px; line-height: 1.65; }
+    .composer-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; gap: 12px; }
+    .hint { font-size: 12px; color: #8592a4; line-height: 1.6; }
+    .actions { display: flex; gap: 8px; }
+    .status { min-height: 39px; padding: 11px 17px; font-size: 12px; color: #52647e; background: #fafbfd; border-top: 1px solid #e7edf4; line-height: 1.6; }
+    .status.error { color: #b42318; }
+    .details-content { padding: 14px 16px; }
+    .details-note { font-size: 12px; color: #7c8b9f; margin: 0 0 12px; line-height: 1.7; }
+    .details-content pre { margin: 0; padding: 13px; font-size: 11px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; background: #f7f9fc; border: 1px solid #e7edf4; border-radius: 8px; max-height: 68vh; overflow: auto; }
+    footer { padding-top: 13px; color: #8794a6; font-size: 11px; line-height: 1.7; }
+    @media (max-width: 950px) { .layout { grid-template-columns: 1fr; } .details-content pre { max-height: 380px; } .settings { grid-template-columns: minmax(160px, 1fr) auto; } .settings .model { grid-column: 1; } }
+    @media (max-width: 520px) { .shell { padding: 14px; } header { align-items: start; } h1 { font-size: 21px; } .settings { padding: 12px; gap: 10px; } .settings .model { grid-column: 1 / -1; } .transcript { padding: 12px; } .hint { max-width: 150px; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div><h1>ShanghaiTech GenAI</h1></div>
+      <div class="badge">v1.0.0</div>
+    </header>
+    <section class="settings" aria-label="连接设置">
+      <label><span>本地网关密钥</span><input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="仅用于本地网关认证"></label>
+      <button id="loadModels" type="button">载入模型</button>
+      <label class="model"><span>模型</span><select id="model"><option value="GPT-6.1-Sol">GPT-6.1-Sol</option><option value="GPT-6.1-Terra">GPT-6.1-Terra</option><option value="GPT-6-Astra">GPT-6-Astra</option><option value="GPT-6-Luna">GPT-6-Luna</option><option value="deepseek-pro">DeepSeek-V4.1-Flash</option><option value="Kimi-k3">Kimi-K3</option><option value="chatglm">GLM-5.3-Flash</option><option value="qwen-instruct">Qwen-3.8</option></select></label>
+      <label class="switch"><input id="searchOption" type="checkbox"><span>Search</span></label>
+      <label class="switch" id="thinkingOptionLabel" hidden><input id="thinkingOption" type="checkbox"><span>Thinking</span></label>
+      <label class="switch"><input id="stream" type="checkbox" checked><span>流式输出</span></label>
+      <button id="newChat" type="button">新会话</button>
+    </section>
+    <section class="panel" aria-label="导入凭证" style="padding:12px 16px;margin-bottom:16px">
+      <button id="importCredentials" type="button">一键导入并保存凭证</button>
+      <button id="logoutCredentials" type="button">取消登录</button>
+      <input id="credentialsFile" type="file" accept=".json,application/json" hidden>
+      <span id="credentialsStatus" class="hint" role="status">仅支持导入油猴 JSON 登录；取消登录会清除本网关保存的凭证，不退出原网站。</span>
+    </section>
+    <script src="/credential-import.js" defer></script>
+    <main class="layout">
+      <section class="panel" aria-label="对话">
+        <div class="panel-title"><span>当前对话</span><span id="counter" class="counter">历史 0 / 20 条</span></div>
+        <div id="transcript" class="transcript" aria-live="polite"><div id="empty" class="empty">输入网关密钥后，发送第一条消息。</div></div>
+        <form id="chatForm" class="composer">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+            <input id="attachment" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.txt,.csv,.docx" style="flex:1;min-width:180px">
+            <button id="upload" type="button">上传附件</button>
+            <button id="clearAttachments" type="button">清除待发送附件</button>
+          </div>
+          <div id="attachmentStatus" class="hint" style="margin-bottom:8px">图片小于 20 MiB，文档小于 10 MiB，支持多选。上传会真实访问网站；可用模型与格式见能力接口。</div>
+          <textarea id="prompt" rows="3" placeholder="输入消息…" aria-label="消息输入"></textarea>
+          <div class="composer-footer"><span class="hint">Enter 发送，Shift + Enter 换行</span><div class="actions"><button id="stop" class="stop" type="button" disabled>停止</button><button id="send" class="primary" type="submit">发送</button></div></div>
+        </form>
+        <div id="status" class="status" role="status">候选模型尚未在线验证。密钥只保留在当前页面内存中。</div>
+      </section>
+      <section class="panel" aria-label="详细消息">
+        <div class="panel-title"><span>详细消息</span><span class="counter">完整内容</span></div>
+        <div class="details-content"><p class="details-note">显示已完成对话上下文，以及当前请求收到的全部兼容 JSON 事件。认证头与密钥不会放入此面板。</p><pre id="details" tabindex="0">尚无消息。</pre></div>
+      </section>
+    </main>
+    <footer>这里只维护当前页面的对话，不修改原网站的会话列表。刷新会清空本地消息和密钥。停止读取不保证上游停止计算或退还额度。</footer>
+  </div>
+  <script>
+    "use strict";
+    const el = Object.fromEntries(["apiKey", "loadModels", "model", "stream", "newChat", "counter", "transcript", "empty", "chatForm", "prompt", "stop", "send", "status", "details", "attachment", "upload", "clearAttachments", "attachmentStatus", "searchOption", "thinkingOption", "thinkingOptionLabel"].map(id => [id, document.getElementById(id)]));
+    let capabilities = null;
+    const modelOptions = new Map();
+    function refreshOptions(restore = false) {
+      const model = capabilities?.models.find(row => row.id === el.model.value);
+      if (restore) {
+        const saved = modelOptions.get(el.model.value);
+        el.searchOption.checked = saved?.search ?? model?.search.default ?? false;
+        el.thinkingOption.checked = saved?.thinking ?? model?.thinking.default ?? false;
+      }
+      el.thinkingOptionLabel.hidden = !model?.thinking.supported;
+      if (!model?.thinking.supported) el.thinkingOption.checked = false;
+      if (!model?.search.supported) el.searchOption.checked = false;
+      el.searchOption.disabled = running || !model?.search.supported;
+      el.thinkingOption.disabled = running || !model?.thinking.supported;
+      el.searchOption.title = '仅控制来源网站搜索；不控制 DSH 的搜索工具。';
+    }
+    el.model.addEventListener('change', () => { refreshOptions(true); refreshAttachments(); });
+    for (const input of [el.searchOption, el.thinkingOption]) input.addEventListener('change', () => {
+      modelOptions.set(el.model.value, {search: el.searchOption.checked, thinking: el.thinkingOption.checked});
+    });
+    let history = [];
+    let websiteConversation = crypto.randomUUID();
+    let receivedEvents = [];
+    let currentRequest = null;
+    let controller = null;
+    let running = false;
+    let modelsLoading = false;
+    let pendingAttachments = [];
+    let attachmentDetails = [];
+
+    function refreshAttachments() {
+      const model = capabilities?.models.find(row => row.id === el.model.value);
+      el.attachmentStatus.textContent = pendingAttachments.length ? "待发送：" + pendingAttachments.map(file => file.filename + (file.model !== el.model.value ? '（模型不匹配）' : file.expires_at <= Date.now()/1000 ? '（已过期）' : '（可用）')).join("、") : `当前模型：图片${model?.attachments.images.supported ? '已开放（验证状态见能力接口）' : '未开放'}，PDF${model?.attachments.pdf.supported ? '已开放' : '未开放'}。附件约一小时失效，重启网关后需重新上传。`;
+      refreshDetails();
+    }
+
+    function setStatus(message, isError = false) {
+      el.status.textContent = message;
+      el.status.classList.toggle("error", isError);
+    }
+    function refreshDetails() {
+      el.counter.textContent = "历史 " + history.length + " / " + (capabilities?.limits?.max_history_messages ?? 128) + " 条";
+      el.details.textContent = JSON.stringify({ completed_messages: history, current_request: currentRequest, attachments: attachmentDetails, received_events: receivedEvents }, null, 2);
+    }
+    function setRunning(value) {
+      running = value;
+      el.send.disabled = value;
+      el.stop.disabled = !value;
+      el.newChat.disabled = value;
+      el.model.disabled = value;
+      refreshOptions();
+      el.stream.disabled = value;
+      el.loadModels.disabled = value || modelsLoading;
+      el.apiKey.disabled = value || modelsLoading;
+      el.upload.disabled = value || modelsLoading;
+      el.attachment.disabled = value;
+      el.clearAttachments.disabled = value;
+    }
+    function scrollMessages() { el.transcript.scrollTop = el.transcript.scrollHeight; }
+    function addMessage(role, text) {
+      if (el.empty) el.empty.remove();
+      const card = document.createElement("article");
+      card.className = "message " + role;
+      const label = document.createElement("div");
+      label.className = "message-label";
+      label.textContent = role === "user" ? "你" : "助手";
+      const reasoning = document.createElement("div");
+      reasoning.className = "reasoning";
+      reasoning.hidden = true;
+      const reasoningTitle = document.createElement("div");
+      reasoningTitle.className = "reasoning-title";
+      reasoningTitle.textContent = "推理内容";
+      const reasoningBody = document.createElement("pre");
+      reasoningBody.className = "reasoning-body";
+      reasoning.append(reasoningTitle, reasoningBody);
+      const body = document.createElement("pre");
+      body.className = "message-body";
+      body.textContent = text;
+      const state = document.createElement("div");
+      state.className = "message-state";
+      card.append(label, reasoning, body, state);
+      el.transcript.append(card);
+      scrollMessages();
+      return { card, body, reasoning, reasoningBody, state };
+    }
+    function gatewayHeaders(key) { return { "Content-Type": "application/json", "Authorization": "Bearer " + key }; }
+    function safeFailure(message) { const e = new Error(message); e.safeUiMessage = message; return e; }
+    function noteEvent(value) { receivedEvents.push(value); refreshDetails(); }
+
+    el.clearAttachments.addEventListener("click", () => { pendingAttachments = []; el.attachment.value = ""; refreshAttachments(); });
+    el.upload.addEventListener("click", async () => {
+      if (running || modelsLoading) return;
+      const key = el.apiKey.value.trim();
+      const files = Array.from(el.attachment.files);
+      if (!key || !files.length) { setStatus("请填写网关密钥并选择附件。", true); return; }
+      if(files.some(file=>!file.size||file.size >= (file.type.startsWith('image/')?20:10)*1024*1024)) {setStatus('图片须小于 20 MiB，文档须小于 10 MiB。',true);return;}
+      controller = new AbortController();
+      setRunning(true);
+      setStatus("正在上传附件到网站，未发送聊天…");
+      try {
+        for(const file of files) {
+        const form = new FormData();
+        form.append("file", file);
+        form.append("model", el.model.value);
+        form.append("purpose", "user_data");
+        form.append("conversation_id", websiteConversation);
+        const response = await fetch("/v1/files", {method:"POST", headers:{Authorization:"Bearer " + key}, body:form, signal:controller.signal, credentials:"omit", cache:"no-store"});
+        const data = await response.json();
+        if (!response.ok || data.error) { noteEvent(data); throw safeFailure("附件上传失败，请查看右侧错误详情。"); }
+        if(!pendingAttachments.some(item=>item.id===data.id))pendingAttachments.push({id:data.id, filename:data.filename, model:data.model, kind:data.kind, expires_at:data.expires_at});
+        attachmentDetails.push(data);
+        }
+        el.attachment.value = "";
+        refreshAttachments();
+        setStatus("附件已上传。输入问题并发送后，将通过网页 fileIds/imageUrls 引用附件。");
+      } catch (error) {
+        setStatus(controller.signal.aborted ? "已停止等待上传；网站可能已经保留了附件。" : error.safeUiMessage || "附件上传未完成。", true);
+      } finally { controller = null; setRunning(false); }
+    });
+
+    el.loadModels.addEventListener("click", async () => {
+      const key = el.apiKey.value.trim();
+      if (!key) { setStatus("请先输入本地网关密钥。", true); return; }
+      modelsLoading = true;
+      el.loadModels.disabled = true;
+      el.send.disabled = true;
+      el.apiKey.disabled = true;
+      setStatus("正在载入模型…");
+      try {
+        const response = await fetch("/v1/models", { headers: { "Authorization": "Bearer " + key }, cache: "no-store", credentials: "omit" });
+        if (!response.ok) throw safeFailure("模型载入失败，请检查网关密钥和服务配置。");
+        const data = await response.json();
+        const capabilityResponse = await fetch('/v1/capabilities', {headers: {Authorization: 'Bearer ' + key}, cache: 'no-store', credentials: 'omit'});
+        if (!capabilityResponse.ok) throw safeFailure('能力信息载入失败，请升级网关并重试。');
+        capabilities = await capabilityResponse.json();
+        if (!Array.isArray(capabilities.models)) throw safeFailure('能力信息格式无法识别。');
+        if (!Array.isArray(data.data) || !data.data.length) throw safeFailure("网关没有返回可用模型，请检查模型配置。");
+        const ids = data.data.filter(item => item && typeof item.id === "string" && item.id.length <= 120).map(item => item.id);
+        if (!ids.length) throw safeFailure("模型列表格式无法识别。");
+        const selected = el.model.value;
+        el.model.replaceChildren();
+          for (const id of ids) { const item = data.data.find(row => row.id === id); const option = document.createElement("option"); option.value = id; option.textContent = typeof item.name === 'string' ? item.name.slice(0, 256) : id; el.model.append(option); }
+        if (ids.includes(selected)) el.model.value = selected;
+          refreshOptions(true);
+          refreshAttachments();
+        setStatus("已载入 " + ids.length + " 个配置模型；这不表示已完成上游可用性验证。");
+      } catch (error) {
+        setStatus(error.safeUiMessage || "模型载入失败，请检查本地网关连接。", true);
+      } finally {
+        modelsLoading = false;
+        el.loadModels.disabled = running;
+        el.send.disabled = running;
+        el.apiKey.disabled = running;
+      }
+    });
+
+    async function readSse(response, onData) {
+      if (!response.body) throw safeFailure("响应没有可读取的流。");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8", { fatal: true });
+      let pending = "";
+      let dataLines = [];
+      let eventName = "message";
+      let doneSeen = false;
+      function dispatch() {
+        if (!dataLines.length) { eventName = "message"; return; }
+        const data = dataLines.join("\n");
+        const name = eventName;
+        dataLines = [];
+        eventName = "message";
+        if (data.trim() === "[DONE]") { doneSeen = true; noteEvent({ event: name, data: "[DONE]" }); return; }
+        let parsed;
+        try { parsed = JSON.parse(data); } catch { throw safeFailure("收到无法识别的兼容流事件，输出未完成。"); }
+        noteEvent(parsed);
+        if (name === "error" || (parsed && parsed.error)) throw safeFailure("网关返回流式错误；详细消息中保留了错误事件。");
+        if (doneSeen) throw safeFailure("结束标记后仍有消息，输出未确认完成。");
+        onData(parsed);
+      }
+      function line(value) {
+        if (value === "") { dispatch(); return; }
+        if (value.startsWith(":")) return;
+        const colon = value.indexOf(":");
+        const field = colon < 0 ? value : value.slice(0, colon);
+        let contents = colon < 0 ? "" : value.slice(colon + 1);
+        if (contents.startsWith(" ")) contents = contents.slice(1);
+        if (field === "data") dataLines.push(contents);
+        else if (field === "event") eventName = contents;
+      }
+      function consume(final = false) {
+        while (pending.length) {
+          const match = /[\r\n]/.exec(pending);
+          if (!match) break;
+          const index = match.index;
+          if (!final && pending[index] === "\r" && index === pending.length - 1) break;
+          const width = pending[index] === "\r" && pending[index + 1] === "\n" ? 2 : 1;
+          line(pending.slice(0, index));
+          pending = pending.slice(index + width);
+        }
+        if (final && pending) { line(pending); pending = ""; }
+      }
+      try {
+        while (true) {
+          const result = await reader.read();
+          if (result.done) break;
+          pending += decoder.decode(result.value, { stream: true });
+          consume();
+          if (doneSeen) { await reader.cancel(); return true; }
+        }
+        pending += decoder.decode();
+        consume(true);
+        dispatch();
+        return doneSeen;
+      } finally { reader.releaseLock(); }
+    }
+
+    el.chatForm.addEventListener("submit", async event => {
+      event.preventDefault();
+      if (running || modelsLoading) return;
+      const key = el.apiKey.value.trim();
+      const prompt = el.prompt.value.trim();
+      if (!key) { setStatus("请先输入本地网关密钥。", true); return; }
+      if (!prompt) { setStatus("请输入消息。", true); return; }
+      if (history.length >= (capabilities?.limits?.max_history_messages ?? 128)) { setStatus("当前会话已达到历史消息限制。请新建会话后继续。", true); return; }
+      if (pendingAttachments.some(file => file.model !== el.model.value)) { setStatus("附件已绑定上传时的模型，请切回该模型或新建会话重新上传。", true); return; }
+      if (pendingAttachments.some(file => file.expires_at <= Date.now()/1000)) { setStatus('附件引用已过期，请清除后重新上传。', true); refreshAttachments(); return; }
+      const userMessage = { role: "user", content: pendingAttachments.length ? [{type:"text", text:prompt}, ...pendingAttachments.map(file => ({type:"file", file:{file_id:file.id}}))] : prompt };
+      const selectedModel = el.model.value;
+      const useStream = el.stream.checked;
+      const payload = { model: selectedModel, messages: [...history, userMessage], stream: useStream, conversation_id: websiteConversation,
+        shanghaitech: {search: el.searchOption.checked, thinking: el.thinkingOption.checked} };
+      currentRequest = payload;
+      receivedEvents = [];
+      refreshDetails();
+      addMessage("user", prompt);
+      const assistant = addMessage("assistant", "");
+      assistant.state.textContent = "等待响应…";
+      el.prompt.value = "";
+      controller = new AbortController();
+      setRunning(true);
+      setStatus("请求进行中。真实发送可能消耗网站额度。");
+      let content = "";
+      let reasoning = "";
+      let finished = false;
+      function update() {
+        assistant.body.textContent = content;
+        assistant.reasoningBody.textContent = reasoning;
+        assistant.reasoning.hidden = !reasoning;
+        assistant.state.textContent = "接收中…";
+        scrollMessages();
+      }
+      try {
+        const response = await fetch("/v1/chat/completions", { method: "POST", headers: gatewayHeaders(key), body: JSON.stringify(payload), signal: controller.signal, credentials: "omit", cache: "no-store" });
+        if (!response.ok) {
+          try { const data = await response.json(); if (data && data.error) noteEvent(data); } catch { /* No response text is inserted into the UI. */ }
+          throw safeFailure("网关拒绝了请求（HTTP " + response.status + "）。请查看详细错误并检查配置。");
+        }
+        if (useStream) {
+          if (!(response.headers.get("content-type") || "").toLowerCase().includes("text/event-stream")) throw safeFailure("网关没有返回预期的流式内容类型。");
+          const done = await readSse(response, data => {
+            if (!data || !Array.isArray(data.choices)) throw safeFailure("兼容流消息格式无法识别。");
+            for (const choice of data.choices) {
+              if (choice.index !== 0 && choice.index !== undefined) continue;
+              const delta = choice.delta || {};
+              if (typeof delta.content === "string") content += delta.content;
+              if (typeof delta.reasoning_content === "string") reasoning += delta.reasoning_content;
+              if (choice.finish_reason != null) finished = true;
+            }
+            update();
+          });
+          if (!done || !finished) throw safeFailure("流已断开，但没有完整结束标记；本次内容不加入后续上下文。");
+        } else {
+          const data = await response.json();
+          noteEvent(data);
+          if (data && data.error) throw safeFailure("网关返回错误；本次内容不加入后续上下文。");
+          const choice = data && Array.isArray(data.choices) ? data.choices[0] : null;
+          if (!choice || !choice.message || typeof choice.message.content !== "string" || choice.finish_reason == null) throw safeFailure("完整响应格式无法识别；本次内容不加入后续上下文。");
+          content = choice.message.content;
+          reasoning = typeof choice.message.reasoning_content === "string" ? choice.message.reasoning_content : "";
+          finished = true;
+          update();
+        }
+        if (!content.trim()) throw safeFailure("本次已结束但没有文本回答，详细内容仍保留；本次消息不加入后续上下文。");
+        history.push(userMessage, { role: "assistant", content });
+        pendingAttachments = [];
+        refreshAttachments();
+        assistant.state.textContent = "已完成 · 已加入后续上下文";
+        setStatus("已完成。当前历史 " + history.length + " / 20 条。");
+        refreshDetails();
+      } catch (error) {
+        const cancelled = controller && controller.signal.aborted;
+        assistant.state.textContent = cancelled ? "已停止 · 部分内容未加入后续上下文" : "未完成 · 本次内容未加入后续上下文";
+        assistant.state.classList.add("failed");
+        setStatus(cancelled ? "已停止读取。本次消息不加入后续上下文；这不保证上游停止计算或退款。" : (error.safeUiMessage || "请求未完成，请检查网关连接或详细错误。"), !cancelled);
+      } finally {
+        controller = null;
+        setRunning(false);
+        scrollMessages();
+        el.prompt.focus();
+      }
+    });
+    el.stop.addEventListener("click", () => { if (controller) controller.abort(); });
+    el.newChat.addEventListener("click", () => {
+      if (running) return;
+      history = [];
+      websiteConversation = crypto.randomUUID();
+      pendingAttachments = [];
+      attachmentDetails = [];
+      el.attachment.value = "";
+      refreshAttachments();
+      receivedEvents = [];
+      currentRequest = null;
+      el.transcript.replaceChildren();
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = "新会话已就绪。";
+      el.transcript.append(empty);
+      el.empty = empty;
+      refreshDetails();
+      setStatus("已清空当前页面的对话。原网站的历史记录不受影响。");
+      el.prompt.focus();
+    });
+    el.prompt.addEventListener("keydown", event => {
+      if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); el.chatForm.requestSubmit(); }
+    });
+  </script>
+</body>
+</html>

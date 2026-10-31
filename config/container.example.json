@@ -1,0 +1,106 @@
+{
+  "gateway_key_file": "/run/secrets/gateway_key",
+  "imported_credentials_file": "/app/browser-credentials/credentials.json",
+  "site_signing_file": "/app/browser-credentials/site-signing.json",
+  "connect_timeout_seconds": 10,
+  "read_timeout_seconds": 90,
+  "total_timeout_seconds": 300,
+  "queue_timeout_seconds": 30,
+  "max_waiting_requests": 4,
+  "models": {
+    "GPT-6.1-Sol": {
+      "enabled": true,
+      "root_ai_type": "azure",
+      "max_tokens": 16384,
+      "enable_thinking": true,
+      "thinking": false,
+      "supports_images": true,
+      "display_name": "GPT-6.1-Sol",
+      "net_go": false,
+      "supports_search": true,
+      "supports_thinking": false
+    },
+    "GPT-6.1-Terra": {
+      "enabled": true,
+      "root_ai_type": "azure",
+      "max_tokens": 16384,
+      "enable_thinking": true,
+      "thinking": false,
+      "supports_images": true,
+      "display_name": "GPT-6.1-Terra",
+      "net_go": false,
+      "supports_search": true,
+      "supports_thinking": false
+    },
+    "GPT-6-Astra": {
+      "enabled": true,
+      "root_ai_type": "azure",
+      "max_tokens": 16384,
+      "enable_thinking": true,
+      "thinking": false,
+      "supports_images": true,
+      "display_name": "GPT-6-Astra",
+      "net_go": false,
+      "supports_search": true,
+      "supports_thinking": false
+    },
+    "GPT-6-Luna": {
+      "enabled": true,
+      "root_ai_type": "azure",
+      "max_tokens": 16384,
+      "enable_thinking": true,
+      "thinking": false,
+      "supports_images": true,
+      "display_name": "GPT-6-Luna",
+      "net_go": false,
+      "supports_search": true,
+      "supports_thinking": false
+    },
+    "deepseek-pro": {
+      "enabled": true,
+      "root_ai_type": "xinference",
+      "max_tokens": 16384,
+      "enable_thinking": false,
+      "supports_files": true,
+      "supports_images": true,
+      "display_name": "DeepSeek-V4.1-Flash",
+      "net_go": false,
+      "supports_search": true,
+      "supports_thinking": false
+    },
+    "Kimi-k3": {
+      "supports_images": true,
+      "enabled": true,
+      "root_ai_type": "xinference",
+      "max_tokens": 16384,
+      "enable_thinking": true,
+      "thinking": false,
+      "display_name": "Kimi-K3",
+      "net_go": false,
+      "supports_search": true,
+      "supports_thinking": true
+    },
+    "chatglm": {
+      "supports_images": true,
+      "enabled": true,
+      "root_ai_type": "xinference",
+      "max_tokens": 16384,
+      "enable_thinking": false,
+      "net_go": false,
+      "display_name": "GLM-5.3-Flash",
+      "supports_search": true,
+      "supports_thinking": false
+    },
+    "qwen-instruct": {
+      "supports_images": true,
+      "enabled": true,
+      "root_ai_type": "xinference",
+      "max_tokens": 16384,
+      "enable_thinking": false,
+      "net_go": false,
+      "display_name": "Qwen-3.8",
+      "supports_search": true,
+      "supports_thinking": false
+    }
+  }
+}

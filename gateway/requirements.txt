@@ -1,0 +1,7 @@
+# Runtime dependency ranges. Offline tests use mocked upstream transports.
+# This is not a reproducible lock file.
+fastapi>=0.115,<0.116
+httpx>=0.28,<0.29
+uvicorn>=0.34,<0.35
+anyio>=4.6,<5
+jsonschema>=4.20,<5

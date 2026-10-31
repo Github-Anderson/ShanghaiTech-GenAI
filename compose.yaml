@@ -1,0 +1,39 @@
+name: shanghaitech-genai
+services:
+  gateway:
+    build:
+      context: ./gateway
+    image: shanghaitech-genai:1.0.0
+    init: true
+    restart: unless-stopped
+    environment:
+      SHANGHAITECH_GENAI_CONFIG: /app/config/local.json
+      IMPORTED_CREDENTIALS_FILE: /app/browser-credentials/credentials.json
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - type: bind
+        source: ./private/browser-credentials
+        target: /app/browser-credentials
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./private/container.json
+        target: /app/config/local.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./private/gateway.key
+        target: /run/secrets/gateway_key
+        read_only: true
+        bind:
+          create_host_path: false
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s

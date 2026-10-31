@@ -1,0 +1,33 @@
+# Local credentials and runtime data
+private/
+browser-credentials/
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.har
+credentials.json
+site-signing.json
+local.json
+.credentials*.yaml
+
+# Python and editor output
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
+
+# Release archives; retain the plugin required by the deployment guide
+*.zip
+*.tar
+*.tgz
+!plugin/dsh-shanghaitech-genai-*.tgz
