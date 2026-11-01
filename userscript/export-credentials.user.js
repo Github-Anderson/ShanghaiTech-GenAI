@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ShanghaiTech GenAI 凭证导出
 // @namespace    local.shanghaitech.gateway
-// @version      1.0.0
+// @version      1.0.1
 // @description  导出主站、图片站及联网搜索签名凭证；仅本地下载。
 // @match        https://genai.shanghaitech.edu.cn/*
 // @run-at       document-start
@@ -198,10 +198,11 @@
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   }
   function extractSigningSalt(source) {
-    // Structure confirmed against app.621d318c.js and a successful search in
-    // the supplied HAR. Read a literal only; never evaluate downloaded code.
+    // Structure confirmed against app.621d318c.js and app.18e5e173.js.
+    // Minification renames the digest import (i -> o); its name is not part
+    // of the signing contract. Read a literal only; never evaluate downloaded code.
     // Refuse changed/minified structures instead of guessing another secret.
-    const pattern = /var ([A-Za-z_$][\w$]*)="([^"\\\r\n]+)",[A-Za-z_$][\w$]*=function\(\)\{function [\s\S]{0,700}?key:"getSign",value:function\(e,t\)\{var n=this\.parseQueryString\(e\),r=this\.mergeObject\(n,t\),a=this\.sortAsc\(r\);return i\(\)\(JSON\.stringify\(a\)\+\1\)\.toUpperCase\(\)\}/g;
+    const pattern = /var ([A-Za-z_$][\w$]*)="([^"\\\r\n]+)",[A-Za-z_$][\w$]*=function\(\)\{function [\s\S]{0,700}?key:"getSign",value:function\(e,t\)\{var n=this\.parseQueryString\(e\),r=this\.mergeObject\(n,t\),a=this\.sortAsc\(r\);return [A-Za-z_$][\w$]*\(\)\(JSON\.stringify\(a\)\+\1\)\.toUpperCase\(\)\}/g;
     return [...source.matchAll(pattern)].map(match => match[2]);
   }
   async function readSigningSalt() {

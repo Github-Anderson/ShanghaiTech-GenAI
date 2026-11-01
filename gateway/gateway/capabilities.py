@@ -35,9 +35,10 @@ def describe_capabilities(models):
                 'documents': {'supported': profile.get('supports_files', False), 'extensions': list(DOCUMENT_MIMES),
                               'max_bytes': MAX_FILE_BYTES, 'max_bytes_exclusive': True, 'multiple': True,
                               'scanned_documents': False, 'reference_field': 'fileIds',
-                              'format_basis': 'successful_synthetic_uploads_20261030',
-                              'unconfirmed_formats': ['doc', 'xls', 'xlsx', 'ppt', 'pptx', 'html', 'json', 'xml'],
-                              'upstream_rejected_formats': ['md', 'rtf']},
+                              'format_basis': 'successful_synthetic_uploads_20261030_and_20261101',
+                              'format_verification_model': 'deepseek-pro',
+                              'unconfirmed_formats': [],
+                              'upstream_rejected_formats': ['md', 'rtf', 'doc', 'xml']},
             },
             'max_output_tokens': profile.get('max_tokens', 16384),
         })

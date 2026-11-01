@@ -31,7 +31,12 @@ STATIC_PREFIX = IMAGE_ORIGIN + "//sys/common/static/"
 IMAGE_MIMES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
 # Conservative allowlist: successful synthetic uploads, not inferred from labels.
 DOCUMENT_MIMES = {'.pdf': 'application/pdf', '.txt': 'text/plain', '.csv': 'text/csv',
-                  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'}
+                  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                  '.xls': 'application/vnd.ms-excel',
+                  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                  '.ppt': 'application/vnd.ms-powerpoint',
+                  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                  '.html': 'text/html', '.json': 'application/json'}
 
 
 def bad(message):
@@ -104,7 +109,7 @@ class Attachments:
         suffix = PurePosixPath(filename.replace('\\', '/')).suffix.lower()
         kind = "image" if mime in IMAGE_MIMES else "document" if suffix in DOCUMENT_MIMES and mime in (DOCUMENT_MIMES[suffix], 'application/octet-stream') else ""
         if not kind:
-            raise bad("Verified uploads: PNG, JPEG, WebP, GIF images; PDF, TXT, CSV and DOCX documents. Other document formats are unconfirmed or unsupported.")
+            raise bad("Verified uploads: PNG, JPEG, WebP, GIF images; PDF, TXT, CSV, DOCX, XLS, XLSX, PPT, PPTX, HTML and JSON documents. Other document formats are unconfirmed or unsupported.")
         limit = MAX_IMAGE_BYTES if kind == 'image' else MAX_FILE_BYTES
         if not data or len(data) >= limit:
             raise GatewayError(413, "attachment_size_limit", "Upload a nonempty image below 20 MiB or document below 10 MiB, matching the website's strict size check.")
@@ -116,8 +121,9 @@ class Attachments:
                  mime == "image/webp" and data.startswith(b'RIFF') and data[8:12] == b'WEBP' or
                  mime == "image/gif" and data[:6] in (b'GIF87a', b'GIF89a') or
                  kind == 'document' and (suffix == '.pdf' and data.startswith(b'%PDF-') or
-                                         suffix == '.docx' and data.startswith(b'PK\x03\x04') or
-                                         suffix in ('.txt', '.csv') and b'\x00' not in data))
+                                         suffix in ('.docx', '.xlsx', '.pptx') and data.startswith(b'PK\x03\x04') or
+                                         suffix in ('.xls', '.ppt') and data.startswith(b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1') or
+                                         suffix in ('.txt', '.csv', '.html', '.json') and b'\x00' not in data))
         if not valid:
             raise bad("File bytes do not match the declared media type.")
         name = PurePosixPath(filename.replace('\\', '/')).name
