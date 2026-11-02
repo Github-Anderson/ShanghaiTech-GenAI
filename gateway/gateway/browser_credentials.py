@@ -142,6 +142,12 @@ class BrowserCredentials:
             return data['image']['headers']['token'] if self.image else data['main']['headers']['X-Access-Token']
         raise GatewayError(503, 'upstream_login_required', 'Import browser credential JSON to log in to the gateway.')
 
+    def get_tenant(self, token):
+        data = self.store.read()
+        if data is None or token != data['main']['headers']['X-Access-Token']:
+            raise GatewayError(503, 'upstream_credentials_changed', 'Import the current website credentials before deleting conversations.')
+        return data['main']['headers']['tenant-id']
+
     def get_signing(self, token):
         data = self.store.read()
         if data is None:

@@ -63,7 +63,7 @@
   <div class="shell">
     <header>
       <div><h1>ShanghaiTech GenAI</h1></div>
-      <div class="badge">v1.0.3</div>
+      <div class="badge">v1.0.4</div>
     </header>
     <section class="settings" aria-label="连接设置">
       <label><span>本地网关密钥</span><input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="仅用于本地网关认证"></label>
@@ -73,6 +73,7 @@
       <label class="switch" id="thinkingOptionLabel" hidden><input id="thinkingOption" type="checkbox"><span>Thinking</span></label>
       <label class="switch"><input id="stream" type="checkbox" checked><span>流式输出</span></label>
       <button id="newChat" type="button">新会话</button>
+      <button id="deleteChat" class="stop" type="button">删除当前会话</button>
     </section>
     <section class="panel" aria-label="导入凭证" style="padding:12px 16px;margin-bottom:16px">
       <button id="importCredentials" type="button">一键导入并保存凭证</button>
@@ -102,11 +103,11 @@
         <div class="details-content"><p class="details-note">显示已完成对话上下文，以及当前请求收到的全部兼容 JSON 事件。认证头与密钥不会放入此面板。</p><pre id="details" tabindex="0">尚无消息。</pre></div>
       </section>
     </main>
-    <footer>这里只维护当前页面的对话，不修改原网站的会话列表。刷新会清空本地消息和密钥。停止读取不保证上游停止计算或退还额度。</footer>
+    <footer>“删除当前会话”会删除关联的网站历史及当前页面消息；“新会话”只切换当前页面。刷新会清空本地消息和密钥。停止读取不保证上游停止计算或退还额度。</footer>
   </div>
   <script>
     "use strict";
-    const el = Object.fromEntries(["apiKey", "loadModels", "model", "stream", "newChat", "counter", "transcript", "empty", "chatForm", "prompt", "stop", "send", "status", "details", "attachment", "upload", "clearAttachments", "attachmentStatus", "searchOption", "thinkingOption", "thinkingOptionLabel"].map(id => [id, document.getElementById(id)]));
+    const el = Object.fromEntries(["apiKey", "loadModels", "model", "stream", "newChat", "deleteChat", "counter", "transcript", "empty", "chatForm", "prompt", "stop", "send", "status", "details", "attachment", "upload", "clearAttachments", "attachmentStatus", "searchOption", "thinkingOption", "thinkingOptionLabel"].map(id => [id, document.getElementById(id)]));
     let capabilities = null;
     const modelOptions = new Map();
     function refreshOptions(restore = false) {
@@ -156,6 +157,7 @@
       el.send.disabled = value;
       el.stop.disabled = !value;
       el.newChat.disabled = value;
+      el.deleteChat.disabled = value || modelsLoading;
       el.model.disabled = value;
       refreshOptions();
       el.stream.disabled = value;
@@ -427,6 +429,30 @@
       refreshDetails();
       setStatus("已清空当前页面的对话。原网站的历史记录不受影响。");
       el.prompt.focus();
+    });
+    el.deleteChat.addEventListener('click', async () => {
+      if (running || modelsLoading) return;
+      const key = el.apiKey.value.trim();
+      if (!key) { setStatus('请先填写网关密钥。', true); return; }
+      if (!window.confirm('删除当前会话及关联的网站历史？删除后不可恢复。')) return;
+      setRunning(true);
+      setStatus('正在删除会话…');
+      try {
+        const response = await fetch('/v1/conversations/' + encodeURIComponent(websiteConversation), {
+          method: 'DELETE', headers: gatewayHeaders(key), signal: AbortSignal.timeout(330000)
+        });
+        const result = await response.json();
+        if (!response.ok || result.deleted !== true) {
+          throw safeFailure(result.error?.code === 'conversation_mapping_missing'
+            ? '找不到完整的上游映射。旧会话或登录已变更的会话请到网站删除；当前消息已保留。'
+            : '删除未完成，当前消息已保留。错误：' + (result.error?.code || 'delete_failed'));
+        }
+        setRunning(false);
+        el.newChat.click();
+        setStatus('会话已删除，网站确认清理 ' + result.deleted_groups + ' 个会话组。');
+      } catch (error) {
+        setStatus(error.safeUiMessage || '无法确认删除结果，当前消息已保留。请检查网关后重试。', true);
+      } finally { setRunning(false); }
     });
     el.prompt.addEventListener("keydown", event => {
       if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); el.chatForm.requestSubmit(); }

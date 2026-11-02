@@ -84,7 +84,12 @@ def describe_capabilities(models):
                   'stream_opt_in': 'stream_options.include_usage', 'site_counters_separate': True},
         'conversations': {'request_field': 'conversation_id', 'persistent': False,
                           'ttl_seconds': TTL_SECONDS, 'max_active': MAX_CONVERSATIONS,
-                          'same_group_serialized': True, 'history': 'caller_supplied'},
+                          'same_group_serialized': True, 'history': 'caller_supplied',
+                          'deletion_ledger_persistent': True,
+                          'delete_endpoint': '/v1/conversations/{conversation_id}',
+                          'delete_batch_endpoint': '/v1/conversations/delete',
+                          'delete_scope': 'upstream_history_and_gateway_mapping',
+                          'delete_requires_complete_mapping': True},
         'verification': {'basis': 'recorded_tests', 'live_probe': False,
                          'all_combinations_verified': False},
     }

@@ -98,6 +98,26 @@ async def signed_get(client, path, params, token, credentials):
         raise GatewayError(502, 'site_connection_error', 'The site request could not be completed.') from None
 
 
+async def delete_site_conversation(client, group, token, tenant):
+    """The deletion HAR captured unsigned GET, X-Access-Token and tenant-id."""
+    if (not isinstance(group, str) or len(group) != 21
+            or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' for c in group)):
+        raise GatewayError(400, 'invalid_upstream_group', 'Select a known upstream conversation group.')
+    if any(not isinstance(v, str) or not v or '\r' in v or '\n' in v for v in (token, tenant)):
+        raise GatewayError(503, 'upstream_authentication_required', 'Import valid website credentials before deleting.')
+    try:
+        async with client.stream('GET', ORIGIN + '/htk/ai/history/delete/groupId',
+                params={'id': group, '_t': int(datetime.now(timezone.utc).timestamp())},
+                headers={'X-Access-Token': token, 'tenant-id': tenant, 'Accept': 'application/json',
+                         'Origin': ORIGIN, 'Referer': ORIGIN + '/dashboard/analysis'},
+                follow_redirects=False) as response:
+            return await read_site_json(response)
+    except httpx.TimeoutException:
+        raise GatewayError(504, 'site_delete_timeout', 'Website deletion timed out. Local records were retained; check the website before retrying.') from None
+    except httpx.HTTPError:
+        raise GatewayError(502, 'site_delete_connection_error', 'Website deletion could not be confirmed. Local records were retained.') from None
+
+
 async def fetch_sources(client, payload, token, credentials):
     """Post the completed turn's snapshot, never a reconstructed next turn."""
     normalized, sign = signed_params(SEARCH_PATH, payload, credentials.salt)

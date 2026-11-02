@@ -25,7 +25,7 @@ from .attachments import Attachments, MAX_FILE_BYTES, MAX_IMAGE_BYTES, bad
 from .protocol import GatewayError, build_upstream_payload, error_body, make_chunk, make_completion
 from .settings import load_settings
 from .upstream import stream_upstream
-from .site_api import fetch_sources
+from .site_api import fetch_sources, delete_site_conversation
 from .tool_bridge import ToolBridge
 from .capabilities import describe_capabilities, PROTOCOL_VERSION
 from .conversations import Conversations, validate_conversation_id
@@ -55,12 +55,16 @@ class Service:
         self.credentials = BrowserCredentials(self.credential_store, getattr(settings, 'site_signing_file', None))
         self.image_credentials = BrowserCredentials(self.credential_store, image=True)
         self.attachments = Attachments()
-        self.conversations = Conversations()
+        journal = self.credential_store.path.with_name('conversations.json') if self.credential_store.path else None
+        self.conversations = Conversations(journal)
+        self.deleting = False
         self.semaphore = asyncio.Semaphore(settings.max_concurrent_requests)
         self.pending = 0
 
     @asynccontextmanager
     async def slot(self):
+        if self.deleting:
+            raise GatewayError(409, 'conversation_deletion_in_progress', 'Wait for conversation deletion to finish.')
         if self.pending >= self.settings.max_waiting_requests + self.settings.max_concurrent_requests:
             raise GatewayError(429, "queue_full", "The local account queue is full.")
         self.pending += 1
@@ -315,7 +319,7 @@ async def logout_browser_credentials(request: Request):
         raise GatewayError(409, 'credentials_in_use', 'Wait for active or queued chat requests to finish before logging out.')
     result = service.credential_store.logout()
     service.attachments = Attachments()
-    service.conversations = Conversations()
+    service.conversations = Conversations(service.conversations.path)
     return JSONResponse(result, headers={'Cache-Control': 'no-store'})
 
 
@@ -331,6 +335,61 @@ async def models(request: Request):
     service = await authorize(request)
     body = {"object": "list", "data": [{"id": name, "name": profile.get('display_name', name), "object": "model", "created": 0, "owned_by": "ShanghaiTech"} for name, profile in service.settings.models.items()]}
     return JSONResponse(body, headers={"Cache-Control": "no-store"})
+
+
+async def delete_conversations(service, ids):
+    if (not isinstance(ids, list) or not 1 <= len(ids) <= 256
+            or any(validate_conversation_id(local) is None for local in ids)):
+        raise GatewayError(400, 'invalid_conversation_ids', 'Supply 1 to 256 conversation IDs.')
+    ids = list(dict.fromkeys(ids))
+    # No awaits between the admission check and gate. Chat/upload and credential
+    # mutations are held out for the entire multi-group operation.
+    if service.pending or service.deleting:
+        raise GatewayError(409, 'conversations_in_use', 'Stop active requests and wait for queued work before deleting.')
+    service.deleting = True
+    service.pending += 1
+    try:
+        token = await asyncio.to_thread(service.credentials.get_token)
+        groups = service.conversations.deletion_plan(token, ids)
+        if groups:
+            tenant = await asyncio.to_thread(service.credentials.get_tenant, token)
+            async with asyncio.timeout(service.settings.total_timeout_seconds):
+                for group in groups:
+                    await delete_site_conversation(service.client, group, token, tenant)
+        # All confirmations are required; a partial failure retains the complete
+        # ledger and the local session for explicit retry, never reports success.
+        service.conversations.confirm_deleted(token, ids)
+        for ref, record in list(service.attachments.records.items()):
+            if record.group in groups:
+                service.attachments.delete(ref)
+        return {'object': 'conversation.deletion', 'conversation_ids': ids,
+                'deleted': True, 'deleted_groups': len(groups), 'scope': 'upstream_history_and_gateway_mapping'}
+    except TimeoutError:
+        raise GatewayError(504, 'site_delete_timeout', 'Conversation deletion did not finish. Local records were retained.') from None
+    finally:
+        service.pending -= 1
+        service.deleting = False
+
+
+@app.delete('/v1/conversations/{conversation_id}')
+async def delete_conversation(conversation_id: str, request: Request):
+    service = await authorize(request)
+    result = await delete_conversations(service, [conversation_id])
+    return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+
+
+@app.post('/v1/conversations/delete')
+async def delete_conversation_batch(request: Request):
+    service = await authorize(request)
+    raw = await read_limited(request, 65536)
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict) or set(data) != {'conversation_ids'}:
+            raise ValueError()
+    except (ValueError, UnicodeError):
+        raise GatewayError(400, 'invalid_delete_request', 'Supply a JSON object with conversation_ids only.') from None
+    result = await delete_conversations(service, data['conversation_ids'])
+    return JSONResponse(result, headers={'Cache-Control': 'no-store'})
 
 
 @app.get('/v1/capabilities')

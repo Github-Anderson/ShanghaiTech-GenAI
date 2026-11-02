@@ -1,6 +1,6 @@
 # ShanghaiTech GenAI
 
-将 ShanghaiTech GenAI 接入 DeepSeek Harness 的本地网关与 Windows 部署工具。当前版本为 **1.0.3**，配套插件适用于 **DSH Desktop ≥ 0.2.1-rc.2**。
+将 ShanghaiTech GenAI 接入 DeepSeek Harness 的本地网关与 Windows 部署工具。当前版本为 **1.0.4**，配套插件适用于 **DSH Desktop ≥ 0.2.1-rc.2**。
 
 网关提供模型列表、对话、联网搜索、Thinking 选项和网站附件接口；DSH 插件提供模型来源、会话选项及基于 Standard 的 Agent 预设。
 
@@ -14,7 +14,7 @@ cd ShanghaiTech-GenAI
 powershell -ExecutionPolicy Bypass -File .\Generate-Key.ps1 -Copy
 ```
 
-在 DSH 插件安装界面提交 `github:Github-Anderson/dsh-shanghaitech-genai#v1.0.3`，配置凭证引用 `SHANGHAITECH_GENAI_API_KEY`，完全退出 DSH 后运行：
+在 DSH 插件安装界面提交 `github:Github-Anderson/dsh-shanghaitech-genai#v1.0.4`，配置凭证引用 `SHANGHAITECH_GENAI_API_KEY`，完全退出 DSH 后运行：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\Start.ps1
@@ -30,6 +30,14 @@ powershell -ExecutionPolicy Bypass -File .\Start.ps1
 
 复测工具为 `tools/probe-document-formats.py`，先测试 TXT 对照，失败时停止判定格式；`--gateway --chat` 可验证经网关上传、解析及 DeepSeek 附件问答。只从指定私有目录读取凭证，不输出凭证或完整响应。
 
+## 删除会话
+
+网关页面的“删除当前会话”会删除关联的网站历史，并清空当前页面的对话。“新会话”只切换当前页面，不删除网站历史。
+
+配套插件在 DSH 输入区提供“删除会话”：确认后永久删除本地会话及其子代理，可选择同时删除网站历史。网站删除失败时保留本地会话；本地全文搜索未启用不会影响删除成功。请先停止正在运行的会话。
+
+删除映射保存在本地私有目录，网关重启后仍可清理已记录的网站会话。升级前已经丢失映射，或网站登录令牌已更换的旧会话，需到网站删除；DSH 可取消“同时删除网站历史”，仅删除本地会话。
+
 ## 目录
 
 | 路径 | 内容 |
@@ -42,7 +50,7 @@ powershell -ExecutionPolicy Bypass -File .\Start.ps1
 | `Sync-Key.cjs` | 将网关密钥同步到 DSH 凭证管理 |
 | `userscript/` | 网站凭证导出脚本 |
 
-插件源码独立维护于 [dsh-shanghaitech-genai](https://github.com/Github-Anderson/dsh-shanghaitech-genai)，通过 `v1.0.3` Git 标签安装，不再随部署仓库提供压缩包。
+插件源码独立维护于 [dsh-shanghaitech-genai](https://github.com/Github-Anderson/dsh-shanghaitech-genai)，通过 `v1.0.4` Git 标签安装，不再随部署仓库提供压缩包。
 
 ## 本地配置
 
