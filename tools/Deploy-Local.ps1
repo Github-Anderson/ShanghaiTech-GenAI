@@ -1,5 +1,5 @@
 param(
-    [string]$LocalRoot = (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'local'),
+    [string]$LocalRoot = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'ShanghaiTech-GenAI'),
     [string]$DshDir = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Programs/DeepSeek Harness'),
     [switch]$SkipPlugin
 )
@@ -22,27 +22,28 @@ if (-not $SkipPlugin) {
         $source = Join-Path $profile $name
         if (Test-Path -LiteralPath $source -PathType Leaf) { Copy-Item -LiteralPath $source -Destination $backup }
     }
-    & $cli plugin --profile desktop add $state.package --offline
+    & $cli plugin --profile desktop add $state.package --prefer-offline
     if ($LASTEXITCODE -ne 0) { throw 'Local plugin installation failed; gateway was not changed.' }
 }
-# This local deployment replaces the existing single-instance gateway on port 8000.
-& (Join-Path $deploy 'Start-Gateway.ps1') -ComposeFile (Join-Path $deploy 'compose.yaml')
+. (Join-Path $PSScriptRoot 'Gateway-Client.ps1')
+$gateway = Get-DshGateway $deploy
+if (-not $gateway.Remote) { & (Join-Path $deploy 'Start-Gateway.ps1') -ComposeFile (Join-Path $deploy 'compose.yaml') }
 $previous = $env:ELECTRON_RUN_AS_NODE
 try {
     $env:ELECTRON_RUN_AS_NODE = '1'
     $logs = Join-Path $LocalRoot 'logs'
     [void][IO.Directory]::CreateDirectory($logs)
-    $arguments = '--expose-internals "' + (Join-Path $deploy 'Sync-Key.cjs') + '" "' + (Join-Path $deploy 'private/gateway.key') + '"'
+    $arguments = '--expose-internals "' + (Join-Path $deploy 'Sync-Key.cjs') + '" "' + $gateway.KeyFile + '"'
     $process = Start-Process -FilePath (Join-Path $DshDir 'DeepSeek Harness.exe') -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput (Join-Path $logs 'sync-key.out.log') -RedirectStandardError (Join-Path $logs 'sync-key.err.log')
     if ($process.ExitCode -ne 0) { throw 'DSH credential synchronization failed; see local logs (no key values).' }
 } finally {
     if ($null -eq $previous) { Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue } else { $env:ELECTRON_RUN_AS_NODE = $previous }
 }
-$key = [IO.File]::ReadAllText((Join-Path $deploy 'private/gateway.key')).Trim()
+$key = [IO.File]::ReadAllText($gateway.KeyFile).Trim()
 try {
     $headers = @{ Authorization = 'Bearer ' + $key }
-    $models = Invoke-RestMethod 'http://127.0.0.1:8000/v1/models' -Headers $headers
-    $credentials = Invoke-RestMethod 'http://127.0.0.1:8000/v1/credentials/status' -Headers $headers
+    $models = Invoke-RestMethod ($gateway.BaseUrl + '/models') -Headers $headers
+    $credentials = Invoke-RestMethod ($gateway.BaseUrl + '/credentials/status') -Headers $headers
     Write-Host ('Authenticated model listing OK: ' + $models.data.Count + ' models.')
     Write-Host ('Website credentials present: ' + $credentials.logged_in + '; upstream not validated.')
 } finally { $key = $null; $headers = $null }

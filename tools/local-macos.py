@@ -13,6 +13,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 import uuid
 
 
@@ -78,6 +79,10 @@ def initialize_private(deploy):
     credentials = target(private, 'browser-credentials')
     credentials.mkdir(parents=True, exist_ok=True)
     private.chmod(0o700)
+    client_config = target(private, 'dsh-gateway.json')
+    if not client_config.exists():
+        write_json(client_config, {'base_url': '', 'key_file': 'remote-gateway.key'})
+    client_config.chmod(0o600)
     # The container runs as uid 10001; Docker Desktop bind mounts retain modes.
     credentials.chmod(0o777)
     config = target(private, 'container.json')
@@ -131,10 +136,43 @@ def sync(args):
     print('Synchronized source snapshot and unique plugin package; private files preserved.')
 
 
-def request(path, key=None):
+def client_gateway(deploy):
+    config = deploy / 'private/dsh-gateway.json'
+    if not config.exists():
+        return 'http://127.0.0.1:8000', deploy / 'private/gateway.key', False
+    data = read_json(config)
+    address = data.get('base_url')
+    if address is None or (isinstance(address, str) and not address.strip()):
+        return 'http://127.0.0.1:8000', deploy / 'private/gateway.key', False
+    try:
+        url = urllib.parse.urlsplit(address.strip())
+        _ = url.port
+    except (ValueError, AttributeError):
+        raise RuntimeError('Invalid DSH gateway base_url') from None
+    if url.scheme not in ('http', 'https') or not url.hostname or url.username or url.password or url.query or url.fragment:
+        raise RuntimeError('Invalid DSH gateway base_url: use an HTTP(S) URL without credentials, query or fragment')
+    base = urllib.parse.urlunsplit(url).rstrip('/')
+    if base.endswith('/v1'):
+        base = base[:-3]
+    return base, target(deploy / 'private', data['key_file']), True
+
+
+def request(path, key=None, base='http://127.0.0.1:8000'):
     headers = {'Authorization': 'Bearer ' + key} if key else {}
-    with urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8000' + path, headers=headers), timeout=5) as response:
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    with opener.open(urllib.request.Request(base + path, headers=headers), timeout=10) as response:
         return json.load(response)
+
+
+def prepare_gateway(deploy):
+    base, _, configured = client_gateway(deploy)
+    if not configured:
+        return gateway(deploy)
+    health = request('/healthz', base=base)
+    if health.get('product') != 'ShanghaiTech GenAI' or health.get('status') != 'alive':
+        raise RuntimeError('Configured DSH gateway health check failed')
+    print('Configured gateway health OK: ' + str(health.get('version')))
+    return health
 
 
 def gateway(deploy):
@@ -156,21 +194,23 @@ def gateway(deploy):
 
 def sync_key(args, deploy):
     env = dict(os.environ, ELECTRON_RUN_AS_NODE='1')
-    run(args.dsh_app / 'Contents/MacOS/DeepSeek Harness', '--expose-internals', deploy / 'Sync-Key-mac.cjs', deploy / 'private/gateway.key', args.dsh_app / 'Contents/Resources', env=env)
+    _, key_file, _ = client_gateway(deploy)
+    run(args.dsh_app / 'Contents/MacOS/DeepSeek Harness', '--expose-internals', deploy / 'Sync-Key-mac.cjs', key_file, args.dsh_app / 'Contents/Resources', env=env)
 
 
 def check_auth(deploy):
-    key = (deploy / 'private/gateway.key').read_text().strip()
+    base, key_file, _ = client_gateway(deploy)
+    key = key_file.read_text().strip()
     for supplied in (None, 'invalid-gateway-key-for-test'):
         try:
-            request('/v1/models', supplied)
+            request('/v1/models', supplied, base)
         except urllib.error.HTTPError as error:
             if error.code != 401:
                 raise
         else:
             raise RuntimeError('Unauthenticated model listing was accepted')
-    models = request('/v1/models', key)
-    credentials = request('/v1/credentials/status', key)
+    models = request('/v1/models', key, base)
+    credentials = request('/v1/credentials/status', key, base)
     print(f"Authentication OK: missing/invalid key rejected, valid key lists {len(models['data'])} models.")
     print(f"Website credentials present: {credentials['logged_in']}; upstream not validated.")
     return {'models': len(models['data']), 'credentials': credentials, 'authentication': 'passed'}
@@ -198,18 +238,61 @@ def deploy(args):
         run(args.dsh_app / 'Contents/Resources/runtime/cli/bin/dsh', 'plugin', '--profile', 'desktop', 'add', package, '--prefer-offline')
         print('DSH desktop plugin updated; profile metadata backed up.')
     deploy_dir = local / 'deploy'
-    health = gateway(deploy_dir)
+    health = prepare_gateway(deploy_dir)
     sync_key(args, deploy_dir)
     checks = check_auth(deploy_dir)
     write_json(local / 'deployment-checks.json', {'health': health, **checks})
 
 
+def deployment_root(args):
+    here = Path(__file__).resolve().parents[1]
+    return here if (here / 'private').is_dir() else args.local_root.resolve() / 'deploy'
+
+
+def setup(args):
+    for executable in ('git', 'docker'):
+        if not shutil.which(executable):
+            raise RuntimeError(f'{executable} is required')
+    runtime = args.dsh_app / 'Contents/Resources/runtime'
+    if not (runtime / 'cli/bin/dsh').is_file():
+        raise RuntimeError('DSH installation missing; specify --dsh-app')
+    if not (args.plugin_repo / 'package.json').is_file():
+        raise RuntimeError('Clone dsh-shanghaitech-genai next to the gateway repository, or specify --plugin-repo')
+    run('docker', 'info', stdout=subprocess.DEVNULL)
+    sync(args)
+    private = args.local_root.resolve() / 'deploy/private'
+    if args.gateway_url is not None:
+        config = {'base_url': args.gateway_url, 'key_file': 'remote-gateway.key'}
+        if args.gateway_key_file:
+            source = args.gateway_key_file.expanduser().resolve()
+            dest = private / 'remote-gateway.key'
+            if source != dest.resolve():
+                shutil.copyfile(source, dest)
+            dest.chmod(0o600)
+        write_json(private / 'dsh-gateway.json', config)
+        (private / 'dsh-gateway.json').chmod(0o600)
+    elif args.gateway_key_file:
+        raise RuntimeError('--gateway-key-file requires --gateway-url')
+    # Validate the selected configuration and key before changing the DSH profile.
+    _, key_file, _ = client_gateway(private.parent)
+    key = key_file.read_text().strip()
+    if not 32 <= len(key) <= 4096 or re.search(r'[^\x21-\x7e]', key):
+        raise RuntimeError('Invalid gateway key file')
+    deploy(args)
+    print('Runtime directory: ' + str(args.local_root.resolve()))
+    print('Fully quit DSH, then run: ' + shlex.quote(str(private.parent / 'Start.sh')))
+
+
 def start(args):
-    deploy_dir = Path(__file__).resolve().parents[1]
-    gateway(deploy_dir)
+    deploy_dir = deployment_root(args)
+    prepare_gateway(deploy_dir)
     sync_key(args, deploy_dir)
     check_auth(deploy_dir)
-    env = dict(os.environ, SHANGHAITECH_GENAI_BASE_URL='http://127.0.0.1:8000/v1')
+    base, _, _ = client_gateway(deploy_dir)
+    env = dict(os.environ, SHANGHAITECH_GENAI_BASE_URL=base + '/v1')
+    host = urllib.parse.urlsplit(base).hostname
+    for name in ('NO_PROXY', 'no_proxy'):
+        env[name] = ','.join(filter(None, [env.get(name, ''), host, '127.0.0.1', 'localhost']))
     env.pop('ELECTRON_RUN_AS_NODE', None)
     logs = deploy_dir.parent / 'logs'
     logs.mkdir(exist_ok=True)
@@ -223,13 +306,15 @@ def start(args):
 if __name__ == '__main__':
     workspace = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['sync', 'deploy', 'start', 'gateway'])
-    parser.add_argument('--local-root', type=Path, default=workspace / 'local')
+    parser.add_argument('action', choices=['sync', 'deploy', 'start', 'gateway', 'setup'])
+    parser.add_argument('--local-root', type=Path, default=Path.home() / '.local/share/shanghaitech-genai')
     parser.add_argument('--plugin-repo', type=Path, default=workspace / 'dsh-shanghaitech-genai')
     parser.add_argument('--dsh-app', type=Path, default=Path('/Applications/DeepSeek Harness.app'))
     parser.add_argument('--skip-plugin', action='store_true')
+    parser.add_argument('--gateway-url', help='Persist a gateway address; an empty value selects the local gateway')
+    parser.add_argument('--gateway-key-file', type=Path, help='Copy an existing remote gateway key into the private directory')
     args = parser.parse_args()
     if args.action == 'gateway':
-        gateway(Path(__file__).resolve().parents[1])
+        gateway(deployment_root(args))
     else:
-        {'sync': sync, 'deploy': deploy, 'start': start}[args.action](args)
+        {'sync': sync, 'deploy': deploy, 'start': start, 'setup': setup}[args.action](args)

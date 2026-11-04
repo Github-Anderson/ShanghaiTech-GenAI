@@ -1,6 +1,6 @@
 param(
     [string]$PluginRepo = (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'dsh-shanghaitech-genai'),
-    [string]$LocalRoot = (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'local'),
+    [string]$LocalRoot = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'ShanghaiTech-GenAI'),
     [string]$PrivateSource,
     [string]$DshDir = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Programs/DeepSeek Harness')
 )
@@ -82,6 +82,10 @@ if ($PrivateSource) {
     }
 }
 & (Join-Path $deploy 'Generate-Key.ps1') -DeployDir $deploy
+$clientConfig = Join-Path $private 'dsh-gateway.json'
+if (-not (Test-Path -LiteralPath $clientConfig)) {
+    @{ base_url = ''; key_file = 'remote-gateway.key' } | ConvertTo-Json | Set-Content -LiteralPath $clientConfig -Encoding utf8
+}
 $packages = Join-Path $LocalRoot 'packages'
 [void][IO.Directory]::CreateDirectory($packages)
 # Unique filenames prevent DSH/pnpm reusing a previously cached package of the same version.
