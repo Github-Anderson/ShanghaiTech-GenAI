@@ -3,7 +3,7 @@ services:
   gateway:
     build:
       context: ./gateway
-    image: shanghaitech-genai:1.0.5
+    image: shanghaitech-genai:1.0.6
     init: true
     restart: unless-stopped
     environment:

@@ -26,14 +26,13 @@ from .protocol import GatewayError, build_upstream_payload, error_body, make_chu
 from .settings import load_settings
 from .upstream import stream_upstream
 from .site_api import fetch_sources, delete_site_conversation
-from .tool_bridge import ToolBridge
+from .tool_bridge import ToolBridge, MAX_OUTPUT_CHARS
 from .capabilities import describe_capabilities, PROTOCOL_VERSION
 from .conversations import Conversations, validate_conversation_id
 from .timings import ImageTimings, timed_output
 from . import __version__
 
 MAX_REQUEST_BYTES = 32 * 1024 * 1024
-MAX_OUTPUT_CHARS = 2_000_000
 logger = logging.getLogger(__name__)
 
 
@@ -81,7 +80,7 @@ class Service:
                 self.semaphore.release()
             self.pending -= 1
 
-    async def events(self, payload, root_ai_type, attachment_plan=None, public_model=None, conversation_id=None, timing=None):
+    async def events(self, payload, root_ai_type, attachment_plan=None, public_model=None, conversation_id=None, timing=None, bridge=None):
         waiting = time.monotonic()
         async with self.slot():
             if timing:
@@ -108,7 +107,7 @@ class Service:
                     timing.elapsed('conversation_wait_ms', waiting)
                 if attachment_plan and self.attachments.mixed_native_mode(attachment_plan):
                     yield {'attachment_mode': 'website_file_ids_and_images'}
-                generated = self.generate(payload, root_ai_type, token, signing, **({'timing': timing} if timing else {}))
+                generated = self.generate(payload, root_ai_type, token, signing, bridge=bridge, **({'timing': timing} if timing else {}))
                 try:
                     async for event in generated:
                         yield event
@@ -159,9 +158,16 @@ class Service:
                     logger.warning('upstream_image_recovery model=deepseek-pro reason=server_500 retry=1')
                 await asyncio.sleep(0.25)
 
-    async def generate(self, payload, root_ai_type, token, signing, timing=None):
+    async def generate(self, payload, root_ai_type, token, signing, timing=None, bridge=None):
         source_snapshot = copy.deepcopy(payload)
         upstream = self.generation_stream(payload, root_ai_type, token, **({'timing': timing} if timing else {}))
+        if bridge is not None:
+            def retry(raw, error):
+                nonlocal source_snapshot
+                corrected = bridge.correction_payload(payload, raw, error)
+                source_snapshot = copy.deepcopy(corrected)
+                return self.generation_stream(corrected, root_ai_type, token, **({'timing': timing} if timing else {}))
+            upstream = bridge.convert(upstream, retry=retry)
         deadline = time.monotonic() + self.settings.total_timeout_seconds
         size = 0
         try:
@@ -528,8 +534,8 @@ async def completions(request: Request):
         timing.count('tool_count', len(bridge.tools))
     root = service.settings.models[model]["root_ai_type"]
     options = {'conversation_id': data['conversation_id']} if data.get('conversation_id') is not None else {}
-    source_events = service.events(payload, root, attachment_plan, model, **options, **({'timing': timing} if timing else {}))
-    events = timed_output(bridge.convert(source_events), timing)
+    source_events = service.events(payload, root, attachment_plan, model, bridge=bridge, **options, **({'timing': timing} if timing else {}))
+    events = timed_output(source_events, timing)
     response_id = "chatcmpl-" + secrets.token_hex(12)
     created = int(time.time())
     if not data.get("stream", False):

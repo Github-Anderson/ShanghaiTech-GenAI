@@ -1,6 +1,6 @@
 # ShanghaiTech GenAI
 
-将 ShanghaiTech GenAI 接入 DeepSeek Harness 的本地网关与 Windows / macOS 部署工具。当前版本为 **1.0.5**，配套插件适用于 **DSH Desktop ≥ 0.2.1-rc.2**。
+将 ShanghaiTech GenAI 接入 DeepSeek Harness 的本地网关与 Windows / macOS 部署工具。当前版本为 **1.0.6**，配套插件适用于 **DSH Desktop ≥ 0.2.1-rc.2**。
 
 网关提供模型列表、对话、联网搜索、Thinking 选项和网站附件接口；DSH 插件提供模型来源、会话选项及基于 Standard 的 Agent 预设。
 
