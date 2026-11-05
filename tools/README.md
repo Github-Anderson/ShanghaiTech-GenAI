@@ -52,7 +52,7 @@ local/
 ./tools/Install-Client.sh \
   --local-root /path/to/client-runtime \
   --dsh-home "$HOME/.dsh" \
-  --plugin-source 'github:Github-Anderson/dsh-shanghaitech-genai#v1.0.6' \
+  --plugin-source 'github:Github-Anderson/dsh-shanghaitech-genai#v1.0.7' \
   --gateway-url http://gateway-host:8000/v1 \
   --gateway-key-file /protected/path/gateway.key
 ```

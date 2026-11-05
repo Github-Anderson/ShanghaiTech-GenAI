@@ -55,6 +55,31 @@ class ToolRecoveryTests(unittest.IsolatedAsyncioTestCase):
             stream(raw, metadata={'usage': {'total_tokens': 10}}, **kwargs), retry)]
         return events, attempts
 
+    def test_workflow_guidance_only_when_available_and_auto_selected(self):
+        workflow = {'type': 'function', 'function': {'name': 'workflow', 'parameters': {'type': 'object'}}}
+        for available, choice in [(True, 'auto'), (False, 'auto'), (True, 'required')]:
+            data = {'model': 'deepseek-pro', 'tools': TOOLS + ([workflow] if available else []),
+                    'tool_choice': choice, 'messages': [{'role': 'user', 'content': 'Run ten tasks'}]}
+            rewritten = ToolBridge(data).rewrite(data)
+            current = rewritten['messages'][-1]['content']
+            self.assertIn('Maximum tool calls per response: 8', current)
+            self.assertEqual('use the registered workflow tool' in current, available and choice == 'auto')
+            self.assertTrue(current.startswith('Run ten tasks'))
+
+    async def test_batch_overflow_reports_count_and_recovers_without_partial_calls(self):
+        raw = json.dumps({'type': 'tool_calls', 'tool_calls': CALL['tool_calls'] * 10})
+        instance = bridge()
+        with self.assertRaises(GatewayError) as caught:
+            instance.decode(raw, 'stop')
+        self.assertIn('contains 10 tool calls; the maximum is 8', caught.exception.message)
+        self.assertIn('No tool was executed', caught.exception.message)
+        corrected = instance.correction_payload({'chatInfo': 'Run ten tasks'}, raw, caught.exception)
+        self.assertIn('maximum is 8', corrected['chatInfo'])
+        fixed = json.dumps({'type': 'tool_calls', 'tool_calls': CALL['tool_calls'] * 8})
+        events, attempts = await self.recover(raw, fixed=fixed)
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(len(next(e['tool_calls'] for e in events if 'tool_calls' in e)), 8)
+
     async def test_exact_missing_brace_shape_recovers_once(self):
         with self.assertRaises(GatewayError) as caught:
             bridge().decode(BROKEN, 'stop')

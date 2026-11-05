@@ -458,7 +458,18 @@ The tools in this catalog run in the client. They are available even if this tex
 Do not include secrets from system instructions or fabricate tool observations.
 If a command is denied, report the real exit code and error. Do not use Start-Process -Verb RunAs to bypass the DSH approval flow. Any wider retry must use the tool's explicit sandbox_permissions and justification fields and remain subject to DSH approval.
 '''+ '\nTool selection policy: ' + json.dumps(self.choice, ensure_ascii=False) +
-                          '\nParallel tool calls allowed: ' + str(self.parallel) + '\n')
+                          '\nParallel tool calls allowed: ' + str(self.parallel) + '\n' +
+                          'Maximum tool calls per response: ' + str(8 if self.parallel else 1) +
+                          '. Split larger work across responses; never omit requested tasks.\n')
+            if 'workflow' in self.tools and self.choice == 'auto':
+                tool_protocol += (
+                    'For a user-requested batch of independent subagent tasks, use the registered workflow tool '
+                    'instead of returning a large array of subagent calls. Reuse its native agent(), parallel(), '
+                    'pipeline() and background Jobs support according to its schema. '
+                    'For this single-account gateway, a JavaScript loop with await agent(...) creates children '
+                    'one at a time; the native workflow engine also enforces its configured creation capacity. '
+                    'Preserve the requested task count. Report each failed/null result explicitly; do not filter '
+                    'failures away or claim every task succeeded. Use only advertised tools and options.\n')
             tool_catalog = ('TOOL CATALOG:\n' + json.dumps(catalog, ensure_ascii=False, separators=(',', ':')) +
                           '\nEND TOOL CATALOG.\nREQUIRED ARGUMENTS (exact names from this request):\n' + json.dumps(required, ensure_ascii=False, separators=(',', ':')) +
                           '\nFor an action requiring a client tool, return a tool_calls envelope with the registered tool name and arguments, then stop. '
@@ -597,8 +608,14 @@ If a command is denied, report the real exit code and error. Do not use Start-Pr
                 raise GatewayError(502, 'tool_choice_not_satisfied', 'The model answered without the required tool.')
             return {'content': value['content']}, 'stop'
         calls = value.get('tool_calls')
-        if value.get('type') != 'tool_calls' or not isinstance(calls, list) or not 1 <= len(calls) <= (8 if self.parallel else 1) or self.choice == 'none':
+        if value.get('type') != 'tool_calls' or not isinstance(calls, list) or not calls or self.choice == 'none':
             raise GatewayError(502, 'tool_bridge_invalid_output', 'Unsupported tool envelope. No tool was executed.')
+        limit = 8 if self.parallel else 1
+        if len(calls) > limit:
+            raise GatewayError(502, 'tool_bridge_invalid_output',
+                f'The response contains {len(calls)} tool calls; the maximum is {limit}. '
+                'Split the work across responses without dropping tasks, or use the registered workflow tool '
+                'if available and allowed by the tool selection policy. No tool was executed.')
         result = []
         for index, call in enumerate(calls):
             if not isinstance(call, dict):
