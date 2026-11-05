@@ -35,4 +35,19 @@ function registerPrivateDir(privateDir, env = process.env) {
     if (fs.existsSync(temp)) fs.unlinkSync(temp);
   }
 }
-module.exports = {resolveGateway, registerPrivateDir};
+const CONNECTION_RECORD = 'dsh-shanghaitech-genai/gateway';
+async function syncGatewayCredentials(provider, privateDir, {replace = false, env = process.env} = {}) {
+  const {baseUrl, keyFile} = resolveGateway(privateDir);
+  const apiKey = fs.readFileSync(keyFile, 'utf8').replace(/^\uFEFF/, '').trim();
+  if (apiKey.length < 32 || apiKey.length > 4096 || /[^\x21-\x7e]/.test(apiKey)) throw Error('Invalid gateway key file.');
+  // The provider locks the complete address/key record. Ordinary startup must
+  // preserve settings saved by the UI, including its optimistic-write revision.
+  await provider.modifyRecord(CONNECTION_RECORD, record => {
+    if (record !== undefined && !replace) return record;
+    return {kind:'grant', payload:{baseUrl, apiKey, revision:require('node:crypto').randomUUID()}};
+  });
+  // Released plugins still consume this reference and private-directory registration.
+  await provider.set('SHANGHAITECH_GENAI_API_KEY', apiKey);
+  registerPrivateDir(privateDir, env);
+}
+module.exports = {resolveGateway, registerPrivateDir, syncGatewayCredentials, CONNECTION_RECORD};

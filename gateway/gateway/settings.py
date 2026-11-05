@@ -5,6 +5,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from .protocol import GatewayError
 
@@ -21,6 +22,7 @@ class Settings:
     max_concurrent_requests: int = 1
     imported_credentials_file: Path | None = None
     site_signing_file: Path | None = None
+    upstream_proxy_url: str | None = None
 
 
 def load_settings() -> Settings:
@@ -88,7 +90,17 @@ def load_settings() -> Settings:
         concurrent = data.get("max_concurrent_requests", 1)
         if type(concurrent) is not int or not 1 <= concurrent <= 4:
             raise ValueError()
-        return Settings(**paths, models=models, max_waiting_requests=waiting,
+        proxy = data.get('upstream_proxy_url')
+        if proxy is not None:
+            if not isinstance(proxy, str) or not proxy.strip():
+                raise ValueError()
+            proxy = proxy.strip()
+            parsed = urlsplit(proxy)
+            _ = parsed.port
+            if (parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password
+                    or parsed.query or parsed.fragment or parsed.path not in ('', '/')):
+                raise ValueError()
+        return Settings(**paths, upstream_proxy_url=proxy, models=models, max_waiting_requests=waiting,
                         max_concurrent_requests=concurrent, **options)
     except (OSError, ValueError, TypeError, KeyError):
         raise GatewayError(503, "configuration_required", "Create config/local.json using the example and configure protected file paths.") from None

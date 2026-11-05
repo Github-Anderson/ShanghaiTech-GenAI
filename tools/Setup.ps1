@@ -28,6 +28,6 @@ $gateway = Get-DshGateway $deploy
 $key = [IO.File]::ReadAllText($gateway.KeyFile).Trim()
 if ($key.Length -lt 32 -or $key.Length -gt 4096 -or $key -match '[^\x21-\x7e]') { throw 'Invalid gateway key file.' }
 $key = $null
-& (Join-Path $PSScriptRoot 'Deploy-Local.ps1') -LocalRoot $LocalRoot -DshDir $DshDir -SkipPlugin:$SkipPlugin
+& (Join-Path $PSScriptRoot 'Deploy-Local.ps1') -LocalRoot $LocalRoot -DshDir $DshDir -SkipPlugin:$SkipPlugin -ReplaceGatewayConnection:($PSBoundParameters.ContainsKey('GatewayUrl'))
 Write-Host "Runtime directory: $LocalRoot"
 Write-Host ('Fully quit DSH, then run: ' + (Join-Path $deploy 'Start.ps1'))

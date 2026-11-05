@@ -1,6 +1,6 @@
 # ShanghaiTech GenAI
 
-将 ShanghaiTech GenAI 接入 DeepSeek Harness 的本地网关与 Windows / macOS 部署工具。当前版本为 **1.0.7**，配套插件适用于 **DSH Desktop ≥ 0.2.1-rc.2**。
+将 ShanghaiTech GenAI 接入 DeepSeek Harness 的本地网关与 Windows / macOS 部署工具。当前版本为 **1.0.8**，配套插件适用于 **DSH Desktop ≥ 0.2.1-rc.2**。
 
 网关提供模型列表、对话、联网搜索、Thinking 选项和网站附件接口；DSH 插件提供模型来源、会话选项及基于 Standard 的 Agent 预设。
 
@@ -60,20 +60,20 @@ Windows 也可双击 `tools/Setup.cmd`。首次部署和后续更新使用同一
 | `tools/Deploy-Local.sh` | 安装本地插件、重建网关并检查部署 |
 | `tools/local-macos.py` | macOS 同步、部署与启动实现 |
 | `Start.sh`、`Start-Gateway.sh` | 在运行目录的 `deploy/` 中启动 DSH 与网关，或只重建网关 |
-| `Sync-Key-mac.cjs` | 将网关密钥同步到 macOS DSH 凭证管理 |
+| `Sync-Key-mac.cjs` | 将网关地址与密钥同步到 macOS DSH 凭证管理 |
 | `Generate-Key.ps1` | Windows：生成私有配置与密钥，可复制密钥到剪贴板 |
 | `Start.ps1`、`Start-Gateway.ps1` | Windows：启动 DSH 与网关，或只重建网关 |
 | `Sync-Key.cjs` | Windows：同步 DSH 网关凭证 |
 | `tools/Sync-Local.ps1`、`tools/Deploy-Local.ps1` | Windows：同步源码、打包并部署本地插件与网关 |
 | `userscript/` | 网站凭证导出脚本 |
 
-插件源码独立维护于 [dsh-shanghaitech-genai](https://github.com/Github-Anderson/dsh-shanghaitech-genai)，Windows / macOS 本地源码部署均从当前插件源码生成唯一名称的本地包，不依赖已发布标签；也可按插件仓库说明安装 `v1.0.5` Git 标签。
+插件源码独立维护于 [dsh-shanghaitech-genai](https://github.com/Github-Anderson/dsh-shanghaitech-genai)，Windows / macOS 本地源码部署均从当前插件源码生成唯一名称的本地包，不依赖已发布标签；也可按插件仓库说明安装 `v1.0.6` Git 标签。
 
 ## 本地配置
 
 开发者长期本地部署、插件打包及源码同步见 [本地开发环境](tools/README.md)。运行副本位于源码仓库外，修改代码后先同步再部署。
 
-个人配置位于运行目录的 `deploy/private/`，保存网关密钥、网站凭证和运行配置。首次同步生成缺失的配置和本地密钥，后续同步保留已有内容。`dsh-gateway.json` 中的地址留空时使用本地网关；填写远程地址和对应密钥文件后，插件直接打开也会使用该配置。网站凭证过期时重新导出并导入。
+个人配置位于运行目录的 `deploy/private/`，保存网关密钥、网站凭证和运行配置。首次同步生成缺失的配置和本地密钥，后续同步保留已有内容。安装脚本首次将 `dsh-gateway.json` 中的地址及对应密钥迁入 DSH 原生凭证库，地址留空时使用本地网关。之后可在插件详情页的“网关连接”中修改；普通更新和启动保留已保存的连接。网站凭证过期时重新导出并导入。
 
 ## 许可证
 

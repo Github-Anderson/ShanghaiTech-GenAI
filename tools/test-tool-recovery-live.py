@@ -167,8 +167,9 @@ async def main():
     key = settings.gateway_key_file.read_text().strip()
     headers = {'Authorization': 'Bearer ' + key}
     failures = []
-    async with httpx.AsyncClient(timeout=330, trust_env=False, follow_redirects=False) as client:
-        service = Service(settings, client)
+    async with (httpx.AsyncClient(timeout=330, trust_env=False, follow_redirects=False) as client,
+                httpx.AsyncClient(timeout=330, trust_env=False, follow_redirects=False, proxy=settings.upstream_proxy_url) as upstream):
+        service = Service(settings, upstream)
         for model in MODELS:
             require('gpt' not in model.lower(), 'GPT model is outside test authorization')
             if model not in settings.models:
@@ -181,7 +182,7 @@ async def main():
                        error_code=error.code if isinstance(error, GatewayError) else str(error)[:160])
         for label, raw in [('missing_brace_live_correction', BROKEN), ('schema_live_correction', BAD_SCHEMA)]:
             try:
-                await fault_case(settings, client, raw, label)
+                await fault_case(settings, upstream, raw, label)
             except Exception as error:
                 failures.append(label)
                 report(case=label, status='FAIL', error_type=type(error).__name__,

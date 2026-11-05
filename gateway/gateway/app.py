@@ -222,6 +222,7 @@ async def lifespan(app):
             timeout=httpx.Timeout(connect=settings.connect_timeout_seconds, read=settings.read_timeout_seconds, write=30, pool=10),
             follow_redirects=False,
             trust_env=False,
+            proxy=settings.upstream_proxy_url,
             limits=httpx.Limits(max_connections=2 * settings.max_concurrent_requests,
                                max_keepalive_connections=settings.max_concurrent_requests),
         )

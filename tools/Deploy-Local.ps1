@@ -1,7 +1,8 @@
 param(
     [string]$LocalRoot = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'ShanghaiTech-GenAI'),
     [string]$DshDir = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Programs/DeepSeek Harness'),
-    [switch]$SkipPlugin
+    [switch]$SkipPlugin,
+    [switch]$ReplaceGatewayConnection
 )
 $ErrorActionPreference = 'Stop'
 $LocalRoot = (Resolve-Path -LiteralPath $LocalRoot).Path
@@ -34,6 +35,7 @@ try {
     $logs = Join-Path $LocalRoot 'logs'
     [void][IO.Directory]::CreateDirectory($logs)
     $arguments = '--expose-internals "' + (Join-Path $deploy 'Sync-Key.cjs') + '" "' + $gateway.KeyFile + '"'
+    if ($ReplaceGatewayConnection) { $arguments += ' --replace-connection' }
     $process = Start-Process -FilePath (Join-Path $DshDir 'DeepSeek Harness.exe') -ArgumentList $arguments -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput (Join-Path $logs 'sync-key.out.log') -RedirectStandardError (Join-Path $logs 'sync-key.err.log')
     if ($process.ExitCode -ne 0) { throw 'DSH credential synchronization failed; see local logs (no key values).' }
 } finally {

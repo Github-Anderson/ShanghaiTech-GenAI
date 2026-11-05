@@ -3,14 +3,14 @@ services:
   gateway:
     build:
       context: ./gateway
-    image: shanghaitech-genai:1.0.7
+    image: shanghaitech-genai:${GENAI_IMAGE_TAG:-1.0.8}
     init: true
     restart: unless-stopped
     environment:
       SHANGHAITECH_GENAI_CONFIG: /app/config/local.json
       IMPORTED_CREDENTIALS_FILE: /app/browser-credentials/credentials.json
     ports:
-      - "127.0.0.1:8000:8000"
+      - "${GENAI_BIND_ADDRESS:-127.0.0.1}:${GENAI_HOST_PORT:-8000}:8000"
     volumes:
       - type: bind
         source: ./private/browser-credentials

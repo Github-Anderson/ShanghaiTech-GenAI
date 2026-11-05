@@ -25,14 +25,16 @@ with tempfile.TemporaryDirectory(prefix='genai-layout-', dir='/private/tmp') as 
     subprocess.run([str(gateway / 'tools/Sync-Local.sh')], cwd='/private/tmp', env=env, check=True)
     runtime = home / '.local/share/shanghaitech-genai'
     assert not (source / 'local').exists()
-    assert json.loads((runtime / 'deploy/private/dsh-gateway.json').read_text())['base_url'] == ''
+    assert json.loads((runtime / 'deploy/private/dsh-gateway.json').read_text()) == {'base_url':'http://127.0.0.1:8000/v1','key_file':'gateway.key'}
     key = (runtime / 'deploy/private/gateway.key').read_bytes()
     state = json.loads((runtime / 'sync-state.json').read_text())
     assert Path(state['package']).is_file()
     assert str(gateway) in (runtime / 'Update.sh').read_text()
     config = runtime / 'deploy/private/dsh-gateway.json'
     config.write_text(json.dumps({'base_url':'https://example.invalid/v1','key_file':'remote.key'}))
+    subprocess.run([str(gateway / 'tools/Sync-Local.sh'), '--gateway-mode', 'external'], cwd='/private/tmp', env=env, check=True)
     subprocess.run([str(gateway / 'tools/Sync-Local.sh')], cwd='/private/tmp', env=env, check=True)
+    assert json.loads((runtime / 'environment.json').read_text())['gateway_mode'] == 'external'
     assert json.loads(config.read_text())['base_url'] == 'https://example.invalid/v1'
     assert (runtime / 'deploy/private/gateway.key').read_bytes() == key
     assert not (source / 'local').exists()
