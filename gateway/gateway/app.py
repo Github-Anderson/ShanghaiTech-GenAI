@@ -14,7 +14,7 @@ from email import policy
 
 import anyio
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Query
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
@@ -31,6 +31,8 @@ from .capabilities import describe_capabilities, PROTOCOL_VERSION
 from .conversations import Conversations, validate_conversation_id
 from .timings import ImageTimings, timed_output
 from . import __version__
+from .audit import AuditStore, AuditMiddleware, request_summary
+from .admin import snapshot, probe_connections
 
 MAX_REQUEST_BYTES = 32 * 1024 * 1024
 logger = logging.getLogger(__name__)
@@ -56,6 +58,10 @@ class Service:
         self.attachments = Attachments()
         journal = self.credential_store.path.with_name('conversations.json') if self.credential_store.path else None
         self.conversations = Conversations(journal)
+        self.audit = AuditStore(journal.with_name('admin.sqlite3') if journal else None)
+        self.started = time.monotonic()
+        self.last_probe = self.probe_identity = None
+        self.probe_lock = asyncio.Lock()
         self.deleting = False
         self.semaphore = asyncio.Semaphore(settings.max_concurrent_requests)
         self.pending = 0
@@ -234,6 +240,8 @@ async def lifespan(app):
     try:
         yield
     finally:
+        if app.state.service is not None:
+            app.state.service.audit.close()
         if client is not None:
             await client.aclose()
 
@@ -241,8 +249,12 @@ async def lifespan(app):
 app = FastAPI(title="ShanghaiTech GenAI", version=__version__, lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
 
+app.add_middleware(AuditMiddleware)
+
+
 @app.exception_handler(GatewayError)
 async def gateway_error_handler(request, error):
+    record_error(request, error)
     return JSONResponse(error_body(error), status_code=error.status_code, headers={"Cache-Control": "no-store"})
 
 
@@ -250,6 +262,18 @@ async def gateway_error_handler(request, error):
 async def unexpected_error_handler(request, error):
     safe = GatewayError(500, "internal_error", "ShanghaiTech GenAI encountered an internal error. No upstream details were logged.")
     return JSONResponse(error_body(safe), status_code=500, headers={"Cache-Control": "no-store"})
+
+
+def record_error(request, error):
+    row = getattr(request.state, 'audit', None)
+    if row is not None:
+        row.update(outcome='failed', error_code=error.code)
+    service = getattr(request.app.state, 'service', None)
+    if service and getattr(request.state, 'authorized', False) and request.url.path in ('/v1/credentials/import', '/v1/credentials/logout'):
+        service.audit.login('credential_import' if request.url.path.endswith('/import') else 'credential_logout', 'failed', error.code)
+    if service and error.code in ('upstream_authentication_required', 'upstream_login_required'):
+        service.last_probe = None
+        service.audit.login('credential_rejected', 'failed', error.code)
 
 
 def get_service(request):
@@ -266,9 +290,13 @@ async def authorize(request):
     scheme, _, provided = value.partition(" ")
     if scheme.lower() != "bearer" or not provided.isascii() or not hmac.compare_digest(provided, key):
         raise GatewayError(401, "invalid_api_key", "A valid local gateway API key is required.")
+    request.state.authorized = True
     return service
 
 
+@app.get('/status', include_in_schema=False)
+@app.get('/log', include_in_schema=False)
+@app.get('/test', include_in_schema=False)
 @app.get("/", include_in_schema=False)
 async def home():
     return FileResponse(Path(__file__).parent / "static" / "index.html", headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff"})
@@ -283,6 +311,56 @@ async def health():
 async def credential_import_script():
     return FileResponse(Path(__file__).parent / 'static' / 'credential-import.js',
                         media_type='text/javascript', headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/style.css', include_in_schema=False)
+async def console_styles():
+    return FileResponse(Path(__file__).parent / 'static' / 'style.css', media_type='text/css', headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/admin.js', include_in_schema=False)
+async def admin_script():
+    return FileResponse(Path(__file__).parent / 'static' / 'admin.js', media_type='text/javascript', headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/test.js', include_in_schema=False)
+async def test_script():
+    return FileResponse(Path(__file__).parent / 'static' / 'test.js', media_type='text/javascript', headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/v1/admin/status')
+async def admin_status(request: Request):
+    return JSONResponse(snapshot(await authorize(request)), headers={'Cache-Control': 'no-store'})
+
+
+@app.post('/v1/admin/probe')
+async def admin_probe(request: Request):
+    service = await authorize(request)
+    origin = request.headers.get('origin')
+    if origin and origin != f'{request.url.scheme}://{request.url.netloc}':
+        raise GatewayError(403, 'invalid_probe_origin', 'Run the check from the gateway page.')
+    try:
+        result = await probe_connections(service)
+    except TimeoutError:
+        raise GatewayError(504, 'probe_timeout', 'The connection check timed out.') from None
+    return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/v1/admin/logs')
+async def admin_logs(request: Request, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
+                     category: str = Query('', pattern='^(|api|management)$'),
+                     outcome: str = Query('', pattern='^(|complete|failed|cancelled)$')):
+    service = await authorize(request)
+    result = service.audit.rows('request', offset, limit, category, outcome)
+    # Do not include this log-read request in the running list.
+    result['active'] = [dict(row) for row in service.audit.active.values() if row is not getattr(request.state, 'audit', None)]
+    return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/v1/admin/login-history')
+async def login_history(request: Request, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
+    service = await authorize(request)
+    return JSONResponse(service.audit.rows('login', offset, limit), headers={'Cache-Control': 'no-store'})
 
 
 @app.post('/v1/credentials/import')
@@ -305,6 +383,8 @@ async def import_browser_credentials(request: Request):
     # A small synchronous atomic write keeps the credential switch indivisible
     # with respect to other handlers in this single-worker gateway.
     result = service.credential_store.save(data)
+    service.last_probe = None
+    service.audit.login('credential_import', 'saved')
     return JSONResponse(result, headers={'Cache-Control': 'no-store'})
 
 
@@ -327,6 +407,8 @@ async def logout_browser_credentials(request: Request):
     if service.pending:
         raise GatewayError(409, 'credentials_in_use', 'Wait for active or queued chat requests to finish before logging out.')
     result = service.credential_store.logout()
+    service.last_probe = None
+    service.audit.login('credential_logout', 'complete')
     service.attachments = Attachments()
     service.conversations = Conversations(service.conversations.path)
     return JSONResponse(result, headers={'Cache-Control': 'no-store'})
@@ -531,6 +613,8 @@ async def completions(request: Request):
     data = await read_request(request)
     bridge = ToolBridge(data)
     config = await service.site_config()
+    if hasattr(request.state, 'audit'):
+        request.state.audit.update(request_summary(data, config.models))
     adapted = trim_history(bridge.rewrite(data), config.message_round)
     rewritten, attachment_plan = service.attachments.plan(adapted, config.models)
     payload, model = build_upstream_payload(rewritten, config.models, config.message_round)
@@ -635,11 +719,14 @@ async def completions(request: Request):
                 except StopAsyncIteration:
                     raise GatewayError(502, "upstream_incomplete", "The upstream stream ended without a recognized completion signal.") from None
         except GatewayError as error:
+            record_error(request, error)
             yield sse(error_body(error))
         except asyncio.CancelledError:
             raise
         except Exception:
-            yield sse(error_body(GatewayError(502, "upstream_stream_error", "The upstream stream could not be completed.")))
+            error = GatewayError(502, 'upstream_stream_error', 'The upstream stream could not be completed.')
+            record_error(request, error)
+            yield sse(error_body(error))
         finally:
             await close_events(events)
 

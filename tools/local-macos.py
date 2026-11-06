@@ -466,7 +466,7 @@ def compose_command(deploy):
     settings = environment_for(deploy)
     env = dict(os.environ, GENAI_BIND_ADDRESS=settings.get('bind_address', '127.0.0.1'),
                GENAI_HOST_PORT=str(settings.get('port', 8000)),
-               GENAI_IMAGE_TAG=settings.get('image_tag', '1.0.9'))
+               GENAI_IMAGE_TAG=settings.get('image_tag', '1.1.0'))
     command = ['docker', 'compose', '-f', str(deploy / 'compose.yaml')]
     if settings.get('compose_override'):
         command += ['-f', settings['compose_override']]

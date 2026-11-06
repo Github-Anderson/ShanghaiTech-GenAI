@@ -1,6 +1,6 @@
 # ShanghaiTech GenAI
 
-将 ShanghaiTech GenAI 接入 DeepSeek Harness 的本地网关与 Windows / macOS 部署工具。当前版本为 **1.0.9**，配套插件适用于 **DSH Desktop ≥ 0.2.1-rc.2**。
+将 ShanghaiTech GenAI 接入 DeepSeek Harness 的本地网关与 Windows / macOS 部署工具。当前版本为 **1.1.0**，配套插件适用于 **DSH Desktop ≥ 0.2.1-rc.2**。
 
 网关提供模型列表、对话、联网搜索、Thinking 选项和网站附件接口；DSH 插件提供模型来源、会话选项及基于 Standard 的 Agent 预设。
 
@@ -32,6 +32,14 @@ Windows 也可双击 `tools/Setup.cmd`。首次部署和后续更新使用同一
 部署完成后，完全退出 DSH，再运行该运行目录中的 `deploy/Start.sh` 或 `deploy/Start.ps1`。自定义路径和远程网关配置见[本地开发环境](tools/README.md)。
 
 首次使用需登录 ShanghaiTech GenAI 网站，使用 `userscript/export-credentials.user.js` 导出凭证，再通过网关网页导入。健康和认证检查通过不代表真实模型调用已验证。详细步骤见[安装指南](安装指南.md)。
+
+## 网关网页
+
+打开网关地址后，在状态页面填写网关密钥，可查看运行状态、检查学校连接和凭证、导入登录凭证及浏览登录历史。学校检查不会发送模型请求或验证图片上传。页内导航保留当前密钥，刷新页面后需重新填写。
+
+请求页面提供请求筛选、分页和参数摘要，包含流式请求的完成、失败或断开结果。请求记录保留最多 7 天 / 2000 条，登录事件最多 365 天 / 500 条，存放在私有凭证目录的 `admin.sqlite3`，重启后保留；不保存认证值、聊天全文或附件正文。
+
+测试页面按网关能力设置模型、联网搜索、深度思考、输出上限和附件，支持系统提示、流式用量及搜索来源展示。高级 JSON 可传入 `tools`、`tool_choice`、`store`；网页只显示工具调用，不执行工具。
 
 ## 网站附件
 

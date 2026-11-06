@@ -5,466 +5,77 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <title>ShanghaiTech GenAI</title>
-  <style>
-    :root { color-scheme: light; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: #172033; background: #f3f6fa; }
-    * { box-sizing: border-box; }
-    body { margin: 0; }
-    button, input, select, textarea { font: inherit; }
-    button { border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; color: #273449; padding: 10px 15px; cursor: pointer; }
-    button:hover:not(:disabled) { background: #eff4fb; border-color: #93a9c5; }
-    button:disabled { opacity: .45; cursor: not-allowed; }
-    button.primary { background: #2259d6; border-color: #2259d6; color: #fff; }
-    button.primary:hover:not(:disabled) { background: #194ab9; }
-    button.stop { color: #b42318; border-color: #efc1bd; }
-    input, select, textarea { width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 12px; background: #fff; color: #172033; }
-    input:focus, select:focus, textarea:focus { outline: 2px solid #a8c1fa; outline-offset: 1px; }
-    label { display: block; font-size: 12px; color: #5b6a7f; }
-    label span { display: block; margin-bottom: 6px; }
-    .shell { max-width: 1440px; margin: 0 auto; padding: 26px; }
-    header { display: flex; gap: 14px; align-items: center; justify-content: space-between; margin-bottom: 18px; }
-    h1 { font-size: 24px; letter-spacing: -.6px; margin: 0 0 7px; }
-    .badge { white-space: nowrap; background: #fff3d7; color: #885b00; border: 1px solid #f0d590; border-radius: 20px; font-size: 12px; padding: 7px 11px; }
-    .settings { display: grid; grid-template-columns: minmax(180px, 1.5fr) auto minmax(180px, 1fr) auto auto; align-items: end; gap: 12px; padding: 16px; border: 1px solid #dde5ef; background: #fff; border-radius: 12px; margin-bottom: 16px; }
-    .switch { display: flex; gap: 7px; align-items: center; white-space: nowrap; height: 42px; font-size: 13px; }
-    .switch input { width: auto; accent-color: #2259d6; }
-    [hidden] { display: none !important; }
-    .switch span { margin: 0; }
-    .layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(300px, 1fr); gap: 16px; align-items: start; }
-    .panel { background: #fff; border: 1px solid #dde5ef; border-radius: 12px; overflow: hidden; }
-    .panel-title { padding: 14px 18px; border-bottom: 1px solid #e7edf4; display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; }
-    .counter { color: #7a8799; font-size: 12px; font-weight: 400; }
-    .transcript { min-height: 330px; max-height: 58vh; overflow: auto; padding: 18px; scroll-behavior: smooth; }
-    .empty { color: #8592a4; text-align: center; padding: 105px 15px; font-size: 14px; }
-    .message { padding: 14px 15px; margin-bottom: 14px; border: 1px solid #e1e8f1; border-radius: 10px; background: #fff; }
-    .message.user { background: #f0f5ff; border-color: #dbe6fc; }
-    .message-label { font-size: 11px; letter-spacing: .5px; color: #6b7d96; font-weight: 600; margin-bottom: 8px; }
-    .message-body, .reasoning-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: 14px; line-height: 1.8; }
-    .message-state { color: #8b98a8; margin-top: 9px; font-size: 12px; }
-    .message-state.failed { color: #b42318; }
-    .reasoning { margin-bottom: 12px; padding: 10px 12px; background: #f6f7fa; border-radius: 7px; color: #667085; }
-    .reasoning-title { font-size: 11px; margin-bottom: 5px; }
-    .reasoning-body { font-size: 13px; }
-    .composer { padding: 16px; border-top: 1px solid #e7edf4; }
-    textarea { resize: vertical; min-height: 100px; line-height: 1.65; }
-    .composer-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; gap: 12px; }
-    .hint { font-size: 12px; color: #8592a4; line-height: 1.6; }
-    .actions { display: flex; gap: 8px; }
-    .status { min-height: 39px; padding: 11px 17px; font-size: 12px; color: #52647e; background: #fafbfd; border-top: 1px solid #e7edf4; line-height: 1.6; }
-    .status.error { color: #b42318; }
-    .details-content { padding: 14px 16px; }
-    .details-note { font-size: 12px; color: #7c8b9f; margin: 0 0 12px; line-height: 1.7; }
-    .details-content pre { margin: 0; padding: 13px; font-size: 11px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; background: #f7f9fc; border: 1px solid #e7edf4; border-radius: 8px; max-height: 68vh; overflow: auto; }
-    footer { padding-top: 13px; color: #8794a6; font-size: 11px; line-height: 1.7; }
-    @media (max-width: 950px) { .layout { grid-template-columns: 1fr; } .details-content pre { max-height: 380px; } .settings { grid-template-columns: minmax(160px, 1fr) auto; } .settings .model { grid-column: 1; } }
-    @media (max-width: 520px) { .shell { padding: 14px; } header { align-items: start; } h1 { font-size: 21px; } .settings { padding: 12px; gap: 10px; } .settings .model { grid-column: 1 / -1; } .transcript { padding: 12px; } .hint { max-width: 150px; } }
-  </style>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/admin.js" defer></script>
+  <script src="/test.js" defer></script>
 </head>
 <body>
-  <div class="shell">
-    <header>
-      <div><h1>ShanghaiTech GenAI</h1></div>
-      <div class="badge">v1.0.9</div>
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="header-top">
+        <div class="brand"><span class="brand-mark" aria-hidden="true">G</span><div><h1>ShanghaiTech GenAI</h1><p>网关控制台</p></div></div>
+        <nav aria-label="主导航"><a href="/status">状态</a><a href="/log">请求</a><a href="/test">测试</a></nav>
+      </div>
+      <div class="connection-bar">
+        <label for="apiKey">网关密钥</label>
+        <input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="输入密钥以连接网关">
+        <button id="connect" type="button">验证连接</button>
+        <p id="connectionStatus" role="status">密钥仅保留在当前页面内存中。</p>
+      </div>
     </header>
-    <section class="settings" aria-label="连接设置">
-      <label><span>本地网关密钥</span><input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="仅用于本地网关认证"></label>
-      <button id="loadModels" type="button">载入模型</button>
-      <label class="model"><span>模型</span><select id="model" disabled><option value="">请先载入模型</option></select></label>
-      <label class="switch"><input id="searchOption" type="checkbox"><span>Search</span></label>
-      <label class="switch" id="thinkingOptionLabel" hidden><input id="thinkingOption" type="checkbox"><span>Thinking</span></label>
-      <label class="switch"><input id="stream" type="checkbox" checked><span>流式输出</span></label>
-      <button id="newChat" type="button">新会话</button>
-      <button id="deleteChat" class="stop" type="button">删除当前会话</button>
-    </section>
-    <section class="panel" aria-label="导入凭证" style="padding:12px 16px;margin-bottom:16px">
-      <button id="importCredentials" type="button">一键导入并保存凭证</button>
-      <button id="logoutCredentials" type="button">取消登录</button>
-      <input id="credentialsFile" type="file" accept=".json,application/json" hidden>
-      <span id="credentialsStatus" class="hint" role="status">仅支持导入油猴 JSON 登录；取消登录会清除本网关保存的凭证，不退出原网站。</span>
-    </section>
-    <script src="/credential-import.js" defer></script>
-    <main class="layout">
-      <section class="panel" aria-label="对话">
-        <div class="panel-title"><span>当前对话</span><span id="counter" class="counter">历史 0 条</span></div>
-        <div id="transcript" class="transcript" aria-live="polite"><div id="empty" class="empty">输入网关密钥并载入模型后，发送第一条消息。</div></div>
-        <form id="chatForm" class="composer">
-          <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
-            <input id="attachment" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.txt,.csv,.docx,.xls,.xlsx,.ppt,.pptx,.html,.htm,.md,.markdown,.log,.json" style="flex:1;min-width:180px">
-            <button id="upload" type="button">上传附件</button>
-            <button id="clearAttachments" type="button">清除待发送附件</button>
-          </div>
-          <div id="attachmentStatus" class="hint" style="margin-bottom:8px">图片小于 10 MiB，文档小于 10 MiB，支持多选。上传会真实访问网站；可用模型与格式见能力接口。</div>
-          <textarea id="prompt" rows="3" placeholder="输入消息…" aria-label="消息输入"></textarea>
-          <div class="composer-footer"><span class="hint">Enter 发送，Shift + Enter 换行</span><div class="actions"><button id="stop" class="stop" type="button" disabled>停止</button><button id="send" class="primary" type="submit">发送</button></div></div>
-        </form>
-        <div id="status" class="status" role="status">模型与能力从网站配置读取。密钥只保留在当前页面内存中。</div>
+    <main>
+      <section id="statusPage" aria-labelledby="statusHeading">
+        <div class="page-heading"><div><h2 id="statusHeading">网关状态</h2><p class="subtitle">查看连接、凭证和最近的登录活动。</p></div><div class="toolbar"><button id="refreshStatus" type="button">刷新状态</button><button id="probe" class="primary" type="button">检查连接</button></div></div>
+        <div class="status-meta"><p id="probeMessage" role="status"></p><p id="probeTime">输入密钥后查看状态</p></div>
+        <div id="statusSummary"><div class="status-placeholder">连接网关，查看服务状态</div></div>
+        <div class="status-bottom">
+          <section class="panel" aria-labelledby="credentialsHeading"><div class="panel-heading"><h3 id="credentialsHeading">网站登录</h3><span class="tag">凭证管理</span></div>
+            <p class="muted">导入学校网页导出的登录凭证，即可连接学校服务。</p>
+            <div class="toolbar"><button id="importCredentials" type="button">导入凭证 JSON</button><button id="logoutCredentials" class="danger" type="button">取消登录</button><input id="credentialsFile" type="file" accept=".json,application/json" hidden></div>
+            <p id="credentialsStatus" class="hint" role="status">取消登录只清除本网关保存的凭证。</p>
+          </section>
+          <section class="panel" aria-labelledby="loginHeading"><div class="panel-heading"><h3 id="loginHeading">登录历史</h3><button id="refreshLogin" class="small" type="button">刷新</button></div>
+            <p class="hint">最近 365 天，最多 500 条记录。</p>
+            <div class="table-wrap"><table><caption class="sr-only">登录事件</caption><thead><tr><th scope="col">时间</th><th scope="col">事件</th><th scope="col">结果</th></tr></thead><tbody id="loginRows"></tbody></table></div>
+            <div class="pagination"><span id="loginCount"></span><div class="toolbar"><button id="loginPrevious" class="small" type="button">上一页</button><button id="loginNext" class="small" type="button">下一页</button></div></div>
+          </section>
+        </div>
       </section>
-      <section class="panel" aria-label="详细消息">
-        <div class="panel-title"><span>详细消息</span><span class="counter">完整内容</span></div>
-        <div class="details-content"><p class="details-note">显示已完成对话上下文，以及当前请求收到的全部兼容 JSON 事件。认证头与密钥不会放入此面板。</p><pre id="details" tabindex="0">尚无消息。</pre></div>
+      <section id="logPage" aria-labelledby="logHeading" hidden>
+        <div class="page-heading"><div><h2 id="logHeading">请求日志</h2><p class="subtitle">查看网关收到的请求及其最终结果。</p></div><button id="refreshLogs" type="button">刷新请求</button></div>
+        <section class="panel log-panel" aria-label="请求记录">
+          <div class="filters"><label class="field">请求类别<select id="logCategory"><option value="api">业务请求</option><option value="management">管理与健康检查</option><option value="">全部</option></select></label><label class="field">请求结果<select id="logOutcome"><option value="">全部</option><option value="complete">完成</option><option value="failed">失败</option><option value="cancelled">断开 / 取消</option></select></label><p class="hint">保留 7 天 / 2000 条<br>不保存密钥、聊天全文或附件正文。</p></div>
+          <p id="logMessage" class="hint" role="status"></p><div id="activeRequests"></div>
+          <div class="table-wrap"><table><caption class="sr-only">已结束请求</caption><thead><tr><th scope="col">时间</th><th scope="col">请求</th><th scope="col">结果</th><th scope="col">耗时与详情</th></tr></thead><tbody id="logRows"></tbody></table></div>
+          <div class="pagination"><span id="logCount"></span><div class="toolbar"><button id="logPrevious" class="small" type="button">上一页</button><button id="logNext" class="small" type="button">下一页</button></div></div>
+        </section>
+      </section>
+      <section id="testPage" aria-labelledby="testHeading" hidden>
+        <div class="page-heading"><div><h2 id="testHeading">模型测试</h2><p class="subtitle">按网关实际能力配置参数，查看完整响应。</p></div><div class="toolbar"><button id="newChat" type="button">新会话</button><button id="deleteChat" class="danger" type="button">删除当前会话</button></div></div>
+        <div class="test-layout">
+          <div class="test-sidebar">
+            <section class="panel" aria-labelledby="modelSettingsHeading"><div class="panel-heading"><h3 id="modelSettingsHeading">模型与参数</h3></div>
+              <div class="model-field"><label class="field">模型<select id="model" disabled><option value="">请先载入模型</option></select></label><button id="loadModels" type="button">载入模型</button></div>
+              <div class="options"><label><input id="searchOption" type="checkbox">联网搜索</label><label id="thinkingOptionLabel" hidden><input id="thinkingOption" type="checkbox">深度思考</label><label><input id="stream" type="checkbox" checked>流式输出</label><label><input id="includeUsage" type="checkbox" checked>返回流式用量</label></div>
+              <label class="field">输出长度上限<input id="maxTokens" type="number" min="1" step="1" placeholder="先载入模型"></label>
+              <p id="modelLimits" class="hint">先载入模型和能力。</p>
+              <details class="advanced"><summary>系统提示与高级参数</summary><label class="field">系统提示<textarea id="systemPrompt" rows="3" placeholder="可选的系统提示"></textarea></label><label class="field">高级参数<textarea id="advancedJson" class="code" rows="3" spellcheck="false" placeholder='{"store": false}'></textarea></label><p class="hint">允许 tools、tool_choice、store。本页仅显示工具调用，不执行工具。</p></details>
+            </section>
+            <section class="panel" aria-labelledby="attachmentsHeading"><div class="panel-heading"><h3 id="attachmentsHeading">附件</h3></div><label class="field">选择文件<input id="attachment" type="file" multiple></label><div class="toolbar"><button id="upload" type="button">上传附件</button><button id="clearAttachments" type="button">清除</button></div><p id="attachmentStatus" class="hint">先载入模型以查看附件格式与限制。</p></section>
+          </div>
+          <div class="test-main">
+            <section class="panel conversation-panel" aria-labelledby="conversationHeading"><div class="panel-heading"><h3 id="conversationHeading">当前对话</h3><span id="counter" class="hint">历史 0 条</span></div>
+              <div id="transcript" aria-live="polite"><p id="empty" class="empty">载入模型后，开始第一条消息。</p></div>
+              <form id="chatForm" class="composer"><label class="sr-only" for="prompt">消息</label><textarea id="prompt" rows="4" placeholder="输入消息…"></textarea><div class="composer-actions"><span class="hint">回车发送，Shift + 回车换行</span><div class="toolbar"><button id="stop" type="button" disabled>停止</button><button id="send" class="primary" type="submit">发送</button></div></div></form>
+              <p id="status" class="request-status" role="status">发送消息会真实调用所选模型。</p>
+            </section>
+            <details class="panel response-details"><summary>请求与响应详情<span>原始数据</span></summary><p class="hint">当前请求、附件信息和收到的完整兼容事件。</p><textarea id="details" class="code" aria-label="请求与响应详情" rows="16" readonly>尚无消息。</textarea></details>
+            <p class="hint footnote">新会话仅切换页面会话；删除会话会清理关联的网站历史。停止读取会保留已显示内容。</p>
+          </div>
+        </div>
       </section>
     </main>
-    <footer>“删除当前会话”会删除关联的网站历史及当前页面消息；“新会话”只切换当前页面。刷新会清空本地消息和密钥。停止读取不保证上游停止计算或退还额度。</footer>
+    <footer class="app-footer">ShanghaiTech GenAI<span>本地网关控制台</span></footer>
   </div>
-  <script>
-    "use strict";
-    const el = Object.fromEntries(["apiKey", "loadModels", "model", "stream", "newChat", "deleteChat", "counter", "transcript", "empty", "chatForm", "prompt", "stop", "send", "status", "details", "attachment", "upload", "clearAttachments", "attachmentStatus", "searchOption", "thinkingOption", "thinkingOptionLabel"].map(id => [id, document.getElementById(id)]));
-    let capabilities = null;
-    function refreshOptions(restore = false) {
-      const model = capabilities?.models.find(row => row.id === el.model.value);
-      if (restore) {
-        el.thinkingOption.checked = false;
-      }
-      el.thinkingOptionLabel.hidden = !model?.thinking.supported;
-      if (!model?.thinking.supported) el.thinkingOption.checked = false;
-      if (!model?.search.supported) el.searchOption.checked = false;
-      el.searchOption.disabled = running || !model?.search.supported;
-      el.thinkingOption.disabled = running || !model?.thinking.supported;
-      el.searchOption.title = '仅控制来源网站搜索；不控制 DSH 的搜索工具。';
-    }
-    el.model.addEventListener('change', () => { resetChat(false); });
-    let history = [];
-    let websiteConversation = crypto.randomUUID();
-    let receivedEvents = [];
-    let currentRequest = null;
-    let controller = null;
-    let running = false;
-    let modelsLoading = false;
-    let pendingAttachments = [];
-    let attachmentDetails = [];
-
-    function refreshAttachments() {
-      const model = capabilities?.models.find(row => row.id === el.model.value);
-      el.attachmentStatus.textContent = pendingAttachments.length ? "待发送：" + pendingAttachments.map(file => file.filename + (file.model !== el.model.value ? '（模型不匹配）' : file.expires_at <= Date.now()/1000 ? '（已过期）' : '（可用）')).join("、") : `当前模型：图片${model?.attachments.images.supported ? '已开放（验证状态见能力接口）' : '未开放'}，PDF${model?.attachments.pdf.supported ? '已开放' : '未开放'}。附件约一小时失效，重启网关后需重新上传。`;
-      refreshDetails();
-    }
-
-    function setStatus(message, isError = false) {
-      el.status.textContent = message;
-      el.status.classList.toggle("error", isError);
-    }
-    function refreshDetails() {
-      el.counter.textContent = "历史 " + history.length + " 条 · " + (capabilities?.limits?.max_history_messages ? "发送最近 " + capabilities.limits.max_history_messages + " 条" : "发送全部历史");
-      el.details.textContent = JSON.stringify({ completed_messages: history, current_request: currentRequest, attachments: attachmentDetails, received_events: receivedEvents }, null, 2);
-    }
-    function setRunning(value) {
-      running = value;
-      const ready = !!capabilities?.models.some(model => model.id === el.model.value);
-      el.send.disabled = value || modelsLoading || !ready;
-      el.stop.disabled = !value;
-      el.newChat.disabled = value;
-      el.deleteChat.disabled = value || modelsLoading;
-      el.model.disabled = value || modelsLoading || !capabilities;
-      refreshOptions();
-      el.stream.disabled = value;
-      el.loadModels.disabled = value || modelsLoading;
-      el.apiKey.disabled = value || modelsLoading;
-      el.upload.disabled = value || modelsLoading || !ready;
-      el.attachment.disabled = value || modelsLoading || !ready;
-      el.clearAttachments.disabled = value;
-    }
-    function scrollMessages() { el.transcript.scrollTop = el.transcript.scrollHeight; }
-    function addMessage(role, text) {
-      if (el.empty) el.empty.remove();
-      const card = document.createElement("article");
-      card.className = "message " + role;
-      const label = document.createElement("div");
-      label.className = "message-label";
-      label.textContent = role === "user" ? "你" : "助手";
-      const reasoning = document.createElement("div");
-      reasoning.className = "reasoning";
-      reasoning.hidden = true;
-      const reasoningTitle = document.createElement("div");
-      reasoningTitle.className = "reasoning-title";
-      reasoningTitle.textContent = "推理内容";
-      const reasoningBody = document.createElement("pre");
-      reasoningBody.className = "reasoning-body";
-      reasoning.append(reasoningTitle, reasoningBody);
-      const body = document.createElement("pre");
-      body.className = "message-body";
-      body.textContent = text;
-      const state = document.createElement("div");
-      state.className = "message-state";
-      card.append(label, reasoning, body, state);
-      el.transcript.append(card);
-      scrollMessages();
-      return { card, body, reasoning, reasoningBody, state };
-    }
-    function gatewayHeaders(key) { return { "Content-Type": "application/json", "Authorization": "Bearer " + key }; }
-    function safeFailure(message) { const e = new Error(message); e.safeUiMessage = message; return e; }
-    function noteEvent(value) { receivedEvents.push(value); refreshDetails(); }
-
-    el.clearAttachments.addEventListener("click", () => { pendingAttachments = []; el.attachment.value = ""; refreshAttachments(); });
-    el.upload.addEventListener("click", async () => {
-      if (running || modelsLoading) return;
-      const key = el.apiKey.value.trim();
-      const files = Array.from(el.attachment.files);
-      if (!key || !files.length) { setStatus("请填写网关密钥并选择附件。", true); return; }
-      if(files.some(file=>!file.size||file.size >= 10*1024*1024)) {setStatus('图片须小于 10 MiB，文档须小于 10 MiB。',true);return;}
-      controller = new AbortController();
-      setRunning(true);
-      setStatus("正在上传附件到网站，未发送聊天…");
-      try {
-        for(const file of files) {
-        const form = new FormData();
-        form.append("file", file);
-        form.append("model", el.model.value);
-        form.append("purpose", "user_data");
-        form.append("conversation_id", websiteConversation);
-        const response = await fetch("/v1/files", {method:"POST", headers:{Authorization:"Bearer " + key}, body:form, signal:controller.signal, credentials:"omit", cache:"no-store"});
-        const data = await response.json();
-        if (!response.ok || data.error) { noteEvent(data); throw safeFailure("附件上传失败，请查看右侧错误详情。"); }
-        if(!pendingAttachments.some(item=>item.id===data.id))pendingAttachments.push({id:data.id, filename:data.filename, model:data.model, kind:data.kind, expires_at:data.expires_at});
-        attachmentDetails.push(data);
-        }
-        el.attachment.value = "";
-        refreshAttachments();
-        setStatus("附件已上传。输入问题并发送后，将通过网页 fileIds/imageUrls 引用附件。");
-      } catch (error) {
-        setStatus(controller.signal.aborted ? "已停止等待上传；网站可能已经保留了附件。" : error.safeUiMessage || "附件上传未完成。", true);
-      } finally { controller = null; setRunning(false); }
-    });
-
-    el.loadModels.addEventListener("click", async () => {
-      const key = el.apiKey.value.trim();
-      if (!key) { setStatus("请先输入本地网关密钥。", true); return; }
-      modelsLoading = true;
-      el.loadModels.disabled = true;
-      el.send.disabled = true;
-      el.apiKey.disabled = true;
-      setStatus("正在载入模型…");
-      try {
-        const response = await fetch("/v1/models?refresh=true", { headers: { "Authorization": "Bearer " + key }, cache: "no-store", credentials: "omit" });
-        if (!response.ok) throw safeFailure("模型载入失败，请检查网关密钥和服务配置。");
-        const data = await response.json();
-        const capabilityResponse = await fetch('/v1/capabilities', {headers: {Authorization: 'Bearer ' + key}, cache: 'no-store', credentials: 'omit'});
-        if (!capabilityResponse.ok) throw safeFailure('能力信息载入失败，请升级网关并重试。');
-        capabilities = await capabilityResponse.json();
-        if (!Array.isArray(capabilities.models)) throw safeFailure('能力信息格式无法识别。');
-        if (!Array.isArray(data.data) || !data.data.length) throw safeFailure("网关没有返回可用模型，请检查模型配置。");
-        const ids = data.data.filter(item => item && typeof item.id === "string" && item.id.length <= 120).map(item => item.id);
-        if (!ids.length) throw safeFailure("模型列表格式无法识别。");
-        const selected = el.model.value;
-        el.model.replaceChildren();
-          for (const id of ids) { const item = data.data.find(row => row.id === id); const option = document.createElement("option"); option.value = id; option.textContent = typeof item.name === 'string' ? item.name.slice(0, 256) : id; el.model.append(option); }
-        if (ids.includes(selected)) el.model.value = selected;
-          refreshOptions(true);
-          refreshAttachments();
-        setStatus("已载入 " + ids.length + " 个配置模型；这不表示已完成上游可用性验证。");
-      } catch (error) {
-        setStatus(error.safeUiMessage || "模型载入失败，请检查本地网关连接。", true);
-      } finally {
-        modelsLoading = false;
-        setRunning(running);
-      }
-    });
-
-    async function readSse(response, onData) {
-      if (!response.body) throw safeFailure("响应没有可读取的流。");
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder("utf-8", { fatal: true });
-      let pending = "";
-      let dataLines = [];
-      let eventName = "message";
-      let doneSeen = false;
-      function dispatch() {
-        if (!dataLines.length) { eventName = "message"; return; }
-        const data = dataLines.join("\n");
-        const name = eventName;
-        dataLines = [];
-        eventName = "message";
-        if (data.trim() === "[DONE]") { doneSeen = true; noteEvent({ event: name, data: "[DONE]" }); return; }
-        let parsed;
-        try { parsed = JSON.parse(data); } catch { throw safeFailure("收到无法识别的兼容流事件，输出未完成。"); }
-        noteEvent(parsed);
-        if (name === "error" || (parsed && parsed.error)) throw safeFailure("网关返回流式错误；详细消息中保留了错误事件。");
-        if (doneSeen) throw safeFailure("结束标记后仍有消息，输出未确认完成。");
-        onData(parsed);
-      }
-      function line(value) {
-        if (value === "") { dispatch(); return; }
-        if (value.startsWith(":")) return;
-        const colon = value.indexOf(":");
-        const field = colon < 0 ? value : value.slice(0, colon);
-        let contents = colon < 0 ? "" : value.slice(colon + 1);
-        if (contents.startsWith(" ")) contents = contents.slice(1);
-        if (field === "data") dataLines.push(contents);
-        else if (field === "event") eventName = contents;
-      }
-      function consume(final = false) {
-        while (pending.length) {
-          const match = /[\r\n]/.exec(pending);
-          if (!match) break;
-          const index = match.index;
-          if (!final && pending[index] === "\r" && index === pending.length - 1) break;
-          const width = pending[index] === "\r" && pending[index + 1] === "\n" ? 2 : 1;
-          line(pending.slice(0, index));
-          pending = pending.slice(index + width);
-        }
-        if (final && pending) { line(pending); pending = ""; }
-      }
-      try {
-        while (true) {
-          const result = await reader.read();
-          if (result.done) break;
-          pending += decoder.decode(result.value, { stream: true });
-          consume();
-          if (doneSeen) { await reader.cancel(); return true; }
-        }
-        pending += decoder.decode();
-        consume(true);
-        dispatch();
-        return doneSeen;
-      } finally { reader.releaseLock(); }
-    }
-
-    el.chatForm.addEventListener("submit", async event => {
-      event.preventDefault();
-      if (running || modelsLoading) return;
-      if (!capabilities?.models.some(model => model.id === el.model.value)) { setStatus("请先载入模型。", true); return; }
-      const key = el.apiKey.value.trim();
-      const prompt = el.prompt.value.trim();
-      if (!key) { setStatus("请先输入本地网关密钥。", true); return; }
-      if (!prompt) { setStatus("请输入消息。", true); return; }
-      if (pendingAttachments.some(file => file.model !== el.model.value)) { setStatus("附件已绑定上传时的模型，请切回该模型或新建会话重新上传。", true); return; }
-      if (pendingAttachments.some(file => file.expires_at <= Date.now()/1000)) { setStatus('附件引用已过期，请清除后重新上传。', true); refreshAttachments(); return; }
-      const userMessage = { role: "user", content: pendingAttachments.length ? [{type:"text", text:prompt}, ...pendingAttachments.map(file => ({type:"file", file:{file_id:file.id}}))] : prompt };
-      const selectedModel = el.model.value;
-      const useStream = el.stream.checked;
-      const payload = { model: selectedModel, messages: [...history, userMessage], stream: useStream, conversation_id: websiteConversation,
-        shanghaitech: {search: el.searchOption.checked, thinking: el.thinkingOption.checked} };
-      currentRequest = payload;
-      receivedEvents = [];
-      refreshDetails();
-      addMessage("user", prompt);
-      const assistant = addMessage("assistant", "");
-      assistant.state.textContent = "等待响应…";
-      el.prompt.value = "";
-      controller = new AbortController();
-      setRunning(true);
-      setStatus("请求进行中。真实发送可能消耗网站额度。");
-      let content = "";
-      let reasoning = "";
-      let finished = false;
-      let searchProgress = "";
-      function readMetadata(data) {
-        const progress = data.shanghaitech?.search_progress;
-        if (progress) searchProgress = progress.stage === 'searching' ? '正在搜索…' : '搜索完成' + (Number.isInteger(progress.count) ? ' · ' + progress.count + ' 条' : '');
-      }
-      function update() {
-        assistant.body.textContent = content;
-        assistant.reasoningBody.textContent = reasoning;
-        assistant.reasoning.hidden = !reasoning;
-        assistant.state.textContent = searchProgress || "接收中…";
-        scrollMessages();
-      }
-      try {
-        const response = await fetch("/v1/chat/completions", { method: "POST", headers: gatewayHeaders(key), body: JSON.stringify(payload), signal: controller.signal, credentials: "omit", cache: "no-store" });
-        if (!response.ok) {
-          try { const data = await response.json(); if (data && data.error) noteEvent(data); } catch { /* No response text is inserted into the UI. */ }
-          throw safeFailure("网关拒绝了请求（HTTP " + response.status + "）。请查看详细错误并检查配置。");
-        }
-        if (useStream) {
-          if (!(response.headers.get("content-type") || "").toLowerCase().includes("text/event-stream")) throw safeFailure("网关没有返回预期的流式内容类型。");
-          const done = await readSse(response, data => {
-            readMetadata(data);
-            if (!data || !Array.isArray(data.choices)) throw safeFailure("兼容流消息格式无法识别。");
-            for (const choice of data.choices) {
-              if (choice.index !== 0 && choice.index !== undefined) continue;
-              const delta = choice.delta || {};
-              if (typeof delta.content === "string") content += delta.content;
-              if (typeof delta.reasoning_content === "string") reasoning += delta.reasoning_content;
-              if (choice.finish_reason != null) finished = true;
-            }
-            update();
-          });
-          if (!done || !finished) throw safeFailure("流已断开，但没有完整结束标记；本次内容不加入后续上下文。");
-        } else {
-          const data = await response.json();
-          noteEvent(data);
-          if (data && data.error) throw safeFailure("网关返回错误；本次内容不加入后续上下文。");
-          const choice = data && Array.isArray(data.choices) ? data.choices[0] : null;
-          if (!choice || !choice.message || typeof choice.message.content !== "string" || choice.finish_reason == null) throw safeFailure("完整响应格式无法识别；本次内容不加入后续上下文。");
-          content = choice.message.content;
-          reasoning = typeof choice.message.reasoning_content === "string" ? choice.message.reasoning_content : "";
-          finished = true;
-          update();
-        }
-        if (!content.trim()) throw safeFailure("本次已结束但没有文本回答，详细内容仍保留；本次消息不加入后续上下文。");
-        const historicalUser = {...userMessage};
-        if (Array.isArray(historicalUser.content)) historicalUser.content = historicalUser.content.map(part => {
-          const file = pendingAttachments.find(file => file.id === part.file?.file_id);
-          return file?.kind === 'document' ? {type:'text', text:'【上传文件：' + file.filename + '】'} : part;
-        });
-        history.push(historicalUser, { role: "assistant", content });
-        pendingAttachments = pendingAttachments.filter(file => file.kind === 'document');
-        refreshAttachments();
-        assistant.state.textContent = "已完成 · 已加入后续上下文";
-        setStatus("已完成。当前历史 " + history.length + " 条。");
-        refreshDetails();
-      } catch (error) {
-        const cancelled = controller && controller.signal.aborted;
-        assistant.state.textContent = cancelled ? "已停止 · 部分内容未加入后续上下文" : "未完成 · 本次内容未加入后续上下文";
-        assistant.state.classList.add("failed");
-        setStatus(cancelled ? "已停止读取。本次消息不加入后续上下文；这不保证上游停止计算或退款。" : (error.safeUiMessage || "请求未完成，请检查网关连接或详细错误。"), !cancelled);
-      } finally {
-        controller = null;
-        setRunning(false);
-        scrollMessages();
-        el.prompt.focus();
-      }
-    });
-    el.stop.addEventListener("click", () => { if (controller) controller.abort(); });
-    function resetChat(selectFirst = true) {
-      if (running) return;
-      if (selectFirst && el.model.options.length) el.model.selectedIndex = 0;
-      refreshOptions(true);
-      history = [];
-      websiteConversation = crypto.randomUUID();
-      pendingAttachments = [];
-      attachmentDetails = [];
-      el.attachment.value = "";
-      refreshAttachments();
-      receivedEvents = [];
-      currentRequest = null;
-      el.transcript.replaceChildren();
-      const empty = document.createElement("div");
-      empty.className = "empty";
-      empty.textContent = "新会话已就绪。";
-      el.transcript.append(empty);
-      el.empty = empty;
-      refreshDetails();
-      setStatus("已清空当前页面的对话。原网站的历史记录不受影响。");
-      el.prompt.focus();
-    }
-    el.newChat.addEventListener("click", () => resetChat());
-    el.deleteChat.addEventListener('click', async () => {
-      if (running || modelsLoading) return;
-      const key = el.apiKey.value.trim();
-      if (!key) { setStatus('请先填写网关密钥。', true); return; }
-      if (!window.confirm('删除当前会话及关联的网站历史？删除后不可恢复。')) return;
-      setRunning(true);
-      setStatus('正在删除会话…');
-      try {
-        const response = await fetch('/v1/conversations/' + encodeURIComponent(websiteConversation), {
-          method: 'DELETE', headers: gatewayHeaders(key), signal: AbortSignal.timeout(330000)
-        });
-        const result = await response.json();
-        if (!response.ok || result.deleted !== true) {
-          throw safeFailure(result.error?.code === 'conversation_mapping_missing'
-            ? '找不到完整的上游映射。旧会话或登录已变更的会话请到网站删除；当前消息已保留。'
-            : '删除未完成，当前消息已保留。错误：' + (result.error?.code || 'delete_failed'));
-        }
-        setRunning(false);
-        el.newChat.click();
-        setStatus('会话已删除，网站确认清理 ' + result.deleted_groups + ' 个会话组。');
-      } catch (error) {
-        setStatus(error.safeUiMessage || '无法确认删除结果，当前消息已保留。请检查网关后重试。', true);
-      } finally { setRunning(false); }
-    });
-    setRunning(false);
-    el.prompt.addEventListener("keydown", event => {
-      if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); el.chatForm.requestSubmit(); }
-    });
-  </script>
 </body>
 </html>
