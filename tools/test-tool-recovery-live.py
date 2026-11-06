@@ -130,7 +130,8 @@ async def fault_case(settings, client, raw, label, model='deepseek-pro'):
                    '协议测试：使用 bash 工具请求 printf 打印 RECOVERY_MARKER。只生成调用，不要模拟执行。'}],
                'shanghaitech': {'search': False, 'thinking': False}}
     bridge = ToolBridge(request)
-    payload, _ = build_upstream_payload(bridge.rewrite(request), settings.models)
+    config = await service.site_config()
+    payload, _ = build_upstream_payload(bridge.rewrite(request), config.models, config.message_round)
     attempts, upstream_calls = [], []
     async def injected(client, payload, root, token, **kwargs):
         attempts.append(copy.deepcopy(payload))
@@ -143,8 +144,8 @@ async def fault_case(settings, client, raw, label, model='deepseek-pro'):
                 yield event
     try:
         with patch('gateway.app.stream_upstream', injected):
-            events = [event async for event in service.events(payload, settings.models[model]['root_ai_type'],
-                       public_model=model, conversation_id=local_id, bridge=bridge)]
+            events = [event async for event in service.events(payload, config.models[model]['root_ai_type'],
+                       public_model=model, conversation_id=local_id, bridge=bridge, config=config)]
         require(len(attempts) == 2 and len(upstream_calls) == 1, 'Expected one real correction request')
         calls = [call for event in events for call in event.get('tool_calls', [])]
         require(len(calls) == 1, 'Correction did not emit exactly one tool')
@@ -170,9 +171,10 @@ async def main():
     async with (httpx.AsyncClient(timeout=330, trust_env=False, follow_redirects=False) as client,
                 httpx.AsyncClient(timeout=330, trust_env=False, follow_redirects=False, proxy=settings.upstream_proxy_url) as upstream):
         service = Service(settings, upstream)
+        config = await service.site_config()
         for model in MODELS:
             require('gpt' not in model.lower(), 'GPT model is outside test authorization')
-            if model not in settings.models:
+            if model not in config.models:
                 continue
             try:
                 await gateway_case(service, client, headers, model, chain=model == 'deepseek-pro')

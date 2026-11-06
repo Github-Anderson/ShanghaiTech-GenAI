@@ -13,7 +13,6 @@ import httpx
 from .protocol import GatewayError
 
 ORIGIN = 'https://genai.shanghaitech.edu.cn'
-SEARCH_PATH = '/htk/chat/net/search'
 MAX_JSON_BYTES = 2 * 1024 * 1024
 
 
@@ -118,27 +117,17 @@ async def delete_site_conversation(client, group, token, tenant):
         raise GatewayError(502, 'site_delete_connection_error', 'Website deletion could not be confirmed. Local records were retained.') from None
 
 
-async def fetch_sources(client, payload, token, credentials):
-    """Post the completed turn's snapshot, never a reconstructed next turn."""
-    normalized, sign = signed_params(SEARCH_PATH, payload, credentials.salt)
-    headers = signed_headers(sign, token, credentials)
-    headers['Content-Type'] = 'application/json'
-    try:
-        async with client.stream('POST', ORIGIN + SEARCH_PATH, json=normalized,
-                                 headers=headers, follow_redirects=False) as response:
-            envelope = await read_site_json(response)
-    except httpx.TimeoutException:
-        raise GatewayError(504, 'sources_timeout', 'The source lookup timed out. The answer remains complete.') from None
-    except httpx.HTTPError:
-        raise GatewayError(502, 'sources_connection_error', 'The source lookup failed. The answer remains complete.') from None
-    result = envelope.get('result')
-    if (not isinstance(result, dict) or not isinstance(result.get('links'), list)
+def normalize_sources(result):
+    """Validate website source data independently of the transport."""
+    if (not isinstance(result, dict) or not isinstance(result.get('links'), list) or len(result['links']) > 100
             or type(result.get('count')) is not int or result['count'] < 0):
         raise GatewayError(502, 'sources_protocol_error', 'The site returned an unsupported source list.')
     links = []
     for link in result['links']:
-        if (not isinstance(link, dict) or type(link.get('num')) is not int
-                or any(not isinstance(link.get(k), str) for k in ('title', 'link', 'snippet'))):
+        if (not isinstance(link, dict) or type(link.get('num')) is not int or link['num'] < 0
+                or any(not isinstance(link.get(k), str) or len(link[k]) > limit
+                       for k, limit in [('title', 1000), ('link', 4096), ('snippet', 10000)])
+                or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in link['link'])):
             raise GatewayError(502, 'sources_protocol_error', 'The site returned an unsupported source entry.')
         try:
             address = urlsplit(link['link'])

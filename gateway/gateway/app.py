@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import copy
 import hmac
 import json
 import logging
@@ -22,10 +21,11 @@ from starlette.background import BackgroundTask
 from .credentials import read_gateway_key
 from .browser_credentials import BrowserCredentialStore, BrowserCredentials, MAX_IMPORT_BYTES, invalid
 from .attachments import Attachments, MAX_FILE_BYTES, MAX_IMAGE_BYTES, bad
-from .protocol import GatewayError, build_upstream_payload, error_body, make_chunk, make_completion
+from .protocol import GatewayError, trim_history, build_upstream_payload, error_body, make_chunk, make_completion
 from .settings import load_settings
+from .site_config import SiteCatalog, SiteConfig
 from .upstream import stream_upstream
-from .site_api import fetch_sources, delete_site_conversation
+from .site_api import delete_site_conversation
 from .tool_bridge import ToolBridge, MAX_OUTPUT_CHARS
 from .capabilities import describe_capabilities, PROTOCOL_VERSION
 from .conversations import Conversations, validate_conversation_id
@@ -59,6 +59,12 @@ class Service:
         self.deleting = False
         self.semaphore = asyncio.Semaphore(settings.max_concurrent_requests)
         self.pending = 0
+        self.catalog = SiteCatalog(client, self.credentials, settings.models)
+
+    async def site_config(self, *, refresh=False):
+        if getattr(self.settings, "dynamic_site_config", False):
+            return await self.catalog.get(refresh=refresh)
+        return SiteConfig(self.settings.models)
 
     @asynccontextmanager
     async def slot(self):
@@ -80,14 +86,16 @@ class Service:
                 self.semaphore.release()
             self.pending -= 1
 
-    async def events(self, payload, root_ai_type, attachment_plan=None, public_model=None, conversation_id=None, timing=None, bridge=None):
+    async def events(self, payload, root_ai_type, attachment_plan=None, public_model=None, conversation_id=None, timing=None, bridge=None, config=None):
         waiting = time.monotonic()
         async with self.slot():
             if timing:
                 timing.elapsed('queue_wait_ms', waiting)
             preparing = time.monotonic()
             token = await asyncio.to_thread(self.credentials.get_token)
-            signing = await asyncio.to_thread(self.credentials.get_signing, token) if payload.get('netGo') else None
+            signing = None
+            config = config or SiteConfig(self.settings.models)
+            config.check_token(token)
             bound_group = None
             if conversation_id is not None:
                 bound_group = self.conversations.group_for(token, public_model or payload['aiType'], conversation_id)
@@ -98,11 +106,12 @@ class Service:
                 if timing:
                     timing.elapsed('credentials_ms', preparing)
                 preparing = time.monotonic()
-                payload = await self.attachments.materialize(self.client, self.settings.models, public_model or payload['aiType'], attachment_plan, payload, token, image_token, bound_group=bound_group, **({'timing': timing} if timing else {}))
+                payload = await self.attachments.materialize(self.client, config.models, public_model or payload['aiType'], attachment_plan, payload, token, image_token, bound_group=bound_group, image_base=config.image_base, **({'timing': timing} if timing else {}))
                 if timing:
                     timing.elapsed('attachment_materialize_ms', preparing)
             waiting = time.monotonic()
             async with self.conversations.lock_group(payload['chatGroupId']):
+                payload = {**payload, 'promptTokens': self.conversations.prompt_tokens.get(payload['chatGroupId'], 0)}
                 if timing:
                     timing.elapsed('conversation_wait_ms', waiting)
                 if attachment_plan and self.attachments.mixed_native_mode(attachment_plan):
@@ -110,6 +119,9 @@ class Service:
                 generated = self.generate(payload, root_ai_type, token, signing, bridge=bridge, **({'timing': timing} if timing else {}))
                 try:
                     async for event in generated:
+                        counter = event.get("upstream_metadata", {}).get("promptTokens")
+                        if type(counter) is int and counter >= 0:
+                            self.conversations.update_prompt_tokens(payload["chatGroupId"], counter)
                         yield event
                 finally:
                     with anyio.CancelScope(shield=True):
@@ -159,13 +171,11 @@ class Service:
                 await asyncio.sleep(0.25)
 
     async def generate(self, payload, root_ai_type, token, signing, timing=None, bridge=None):
-        source_snapshot = copy.deepcopy(payload)
+        sources_seen = False
         upstream = self.generation_stream(payload, root_ai_type, token, **({'timing': timing} if timing else {}))
         if bridge is not None:
             def retry(raw, error):
-                nonlocal source_snapshot
                 corrected = bridge.correction_payload(payload, raw, error)
-                source_snapshot = copy.deepcopy(corrected)
                 return self.generation_stream(corrected, root_ai_type, token, **({'timing': timing} if timing else {}))
             upstream = bridge.convert(upstream, retry=retry)
         deadline = time.monotonic() + self.settings.total_timeout_seconds
@@ -184,19 +194,11 @@ class Service:
                 size += len(event.get("content", "")) + len(event.get("reasoning_content", ""))
                 if size > MAX_OUTPUT_CHARS:
                     raise GatewayError(502, "upstream_output_limit", "The ShanghaiTech GenAI output size limit was reached.")
+                if event.get('sources_status'):
+                    sources_seen = True
                 if event.get("finish_reason"):
-                    if signing is not None:
-                        try:
-                            remaining = deadline - time.monotonic()
-                            if remaining <= 0:
-                                raise TimeoutError()
-                            sources = await asyncio.wait_for(fetch_sources(
-                                self.client, source_snapshot, token, signing), remaining)
-                            yield {'sources': sources, 'sources_status': 'ready'}
-                        except GatewayError as error:
-                            yield {'sources_status': 'failed', 'sources_error': error.code}
-                        except TimeoutError:
-                            yield {'sources_status': 'failed', 'sources_error': 'sources_timeout'}
+                    if payload.get('netGo') and not sources_seen:
+                        yield {'sources_status': 'failed', 'sources_error': 'upstream_sources_missing'}
                     yield event
                     return
                 yield event
@@ -338,9 +340,10 @@ async def ready(request: Request):
 
 
 @app.get("/v1/models")
-async def models(request: Request):
+async def models(request: Request, refresh: bool = False):
     service = await authorize(request)
-    body = {"object": "list", "data": [{"id": name, "name": profile.get('display_name', name), "object": "model", "created": 0, "owned_by": "ShanghaiTech"} for name, profile in service.settings.models.items()]}
+    config = await service.site_config(refresh=refresh)
+    body = {"object": "list", "data": [{"id": name, "name": profile.get('display_name', name), "object": "model", "created": 0, "owned_by": "ShanghaiTech"} for name, profile in config.models.items()]}
     return JSONResponse(body, headers={"Cache-Control": "no-store"})
 
 
@@ -400,9 +403,10 @@ async def delete_conversation_batch(request: Request):
 
 
 @app.get('/v1/capabilities')
-async def capabilities(request: Request):
+async def capabilities(request: Request, refresh: bool = False):
     service = await authorize(request)
-    return JSONResponse(describe_capabilities(service.settings.models), headers={'Cache-Control': 'no-store'})
+    config = await service.site_config(refresh=refresh)
+    return JSONResponse(describe_capabilities(config.models, config.message_round), headers={'Cache-Control': 'no-store'})
 
 
 async def read_limited(request, limit):
@@ -447,19 +451,21 @@ async def upload_file(request: Request):
                 raise bad('Invalid multipart metadata.') from None
     if not uploaded or fields.get('purpose', 'user_data') != 'user_data':
         raise bad('Supply one file and purpose=user_data.')
+    config = await service.site_config()
     model = fields.get('model')
-    if not isinstance(model, str) or model not in service.settings.models:
+    if not isinstance(model, str) or model not in config.models:
         raise bad('Supply the selected gateway model in the model field.')
     conversation_id = validate_conversation_id(fields.get('conversation_id'))
     if fields.get('include_content', 'true') not in ('true', 'false'):
         raise bad('include_content must be true or false.')
-    kind, _ = service.attachments.validate_file(*uploaded, model, service.settings.models)
+    kind, _ = service.attachments.validate_file(*uploaded, model, config.models)
     async with service.slot():
         token = await asyncio.to_thread(service.credentials.get_token)
+        config.check_token(token)
         image_token = await service.image_token() if kind == 'image' else None
         group = service.conversations.group_for(token, model, conversation_id) if conversation_id is not None else None
         async with service.conversations.lock_group(group or '__unbound_upload__'):
-            record = await service.attachments.upload(service.client, service.settings.models, model, *uploaded, token, image_token, chat_group_id=group)
+            record = await service.attachments.upload(service.client, config.models, model, *uploaded, token, image_token, chat_group_id=group, image_base=config.image_base)
     return JSONResponse(record.public(include_content=fields.get('include_content') != 'false'), headers={'Cache-Control': 'no-store'})
 
 
@@ -498,7 +504,7 @@ def sse(data):
 def collect_metadata(target, event):
     if 'usage' in event:
         target['usage'] = event['usage']
-    for key in ('sources', 'sources_status', 'sources_error', 'upstream_metadata', 'tool_routing', 'attachment_mode', 'timings'):
+    for key in ('sources', 'sources_status', 'sources_error', 'search_progress', 'upstream_metadata', 'tool_routing', 'attachment_mode', 'timings'):
         if key in event:
             target.setdefault('shanghaitech', {})[key] = event[key]
 
@@ -524,18 +530,19 @@ async def completions(request: Request):
     service = await authorize(request)
     data = await read_request(request)
     bridge = ToolBridge(data)
-    adapted = bridge.rewrite(data)
-    rewritten, attachment_plan = service.attachments.plan(adapted, service.settings.models)
-    payload, model = build_upstream_payload(rewritten, service.settings.models)
+    config = await service.site_config()
+    adapted = trim_history(bridge.rewrite(data), config.message_round)
+    rewritten, attachment_plan = service.attachments.plan(adapted, config.models)
+    payload, model = build_upstream_payload(rewritten, config.models, config.message_round)
     has_images = any(isinstance(ref, tuple) or ref.kind == 'image' for refs in attachment_plan.values() for ref in refs)
     timing = ImageTimings(started) if has_images else None
     if timing:
         timing.elapsed('request_prepare_ms', started)
         timing.count('upstream_request_bytes', len(json.dumps(payload, ensure_ascii=False).encode('utf8')))
         timing.count('tool_count', len(bridge.tools))
-    root = service.settings.models[model]["root_ai_type"]
+    root = config.models[model]["root_ai_type"]
     options = {'conversation_id': data['conversation_id']} if data.get('conversation_id') is not None else {}
-    source_events = service.events(payload, root, attachment_plan, model, bridge=bridge, **options, **({'timing': timing} if timing else {}))
+    source_events = service.events(payload, root, attachment_plan, model, bridge=bridge, config=config, **options, **({'timing': timing} if timing else {}))
     events = timed_output(source_events, timing)
     response_id = "chatcmpl-" + secrets.token_hex(12)
     created = int(time.time())
@@ -608,6 +615,10 @@ async def completions(request: Request):
                 delta = {key: event[key] for key in ["content", "reasoning_content", "tool_calls"] if key in event}
                 if delta:
                     yield sse(make_chunk(response_id, created, model, delta))
+                if "search_progress" in event:
+                    progress = make_chunk(response_id, created, model, {})
+                    progress.update(choices=[], shanghaitech={"search_progress": event["search_progress"]})
+                    yield sse(progress)
                 if event.get("finish_reason"):
                     final = make_chunk(response_id, created, model, {}, finish_reason=event["finish_reason"])
                     if 'shanghaitech' in metadata:

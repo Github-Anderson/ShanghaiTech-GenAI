@@ -13,7 +13,6 @@ from typing import Any
 
 
 MAX_INPUT_BYTES = 1024 * 1024
-MAX_HISTORY_MESSAGES = 128
 
 # Public random-ID alphabet from the captured e1bd JavaScript module (E251).
 # This is an alphabet, not an existing conversation ID or authentication value.
@@ -69,8 +68,18 @@ def resolve_model_options(request: dict, profile: dict) -> tuple[bool, bool]:
     return search, thinking
 
 
+def trim_history(request: dict, message_round: int = 30) -> dict:
+    """The current turn and leading system prompt are outside the history window."""
+    messages = request.get('messages')
+    if not isinstance(messages, list) or not messages or message_round <= 0:
+        return request
+    system = messages[:1] if isinstance(messages[0], dict) and messages[0].get('role') == 'system' else []
+    history = messages[len(system):-1]
+    return {**request, 'messages': system + history[-2 * message_round:] + messages[-1:]}
+
+
 def build_upstream_payload(
-    request: dict[str, Any], models: dict[str, dict[str, Any]]
+    request: dict[str, Any], models: dict[str, dict[str, Any]], message_round: int = 30
 ) -> tuple[dict[str, Any], str]:
     """Convert the supported Chat Completions subset into captured site fields.
 
@@ -130,11 +139,7 @@ def build_upstream_payload(
     messages = request.get("messages")
     if not isinstance(messages, list) or not messages:
         raise _invalid("invalid_messages", "Messages must be a nonempty array of text messages.")
-    if len(messages) - 1 > MAX_HISTORY_MESSAGES:
-        raise _invalid(
-            "history_too_long",
-            "The gateway accepts at most 128 historical messages before the current user message.",
-        )
+    messages = trim_history(request, message_round)['messages']
 
     normalized: list[dict[str, str]] = []
     for index, message in enumerate(messages):

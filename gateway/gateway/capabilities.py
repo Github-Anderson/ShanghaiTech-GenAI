@@ -3,14 +3,13 @@
 Verification describes recorded evidence, not a live upstream health check.
 """
 from .attachments import MAX_FILE_BYTES, MAX_IMAGE_BYTES, MAX_FILES, FILE_TTL_SECONDS, DOCUMENT_MIMES, IMAGE_MIMES
-from .protocol import MAX_HISTORY_MESSAGES
 from .conversations import TTL_SECONDS, MAX_CONVERSATIONS
 from .tool_bridge import MAX_ARGUMENT_JSON_DECODES, TAGGED_ARGUMENT_TYPES
 
 PROTOCOL_VERSION = '1.1'
 
 
-def describe_capabilities(models):
+def describe_capabilities(models, message_round=30):
     entries = []
     for model, profile in models.items():
         upstream = profile.get('upstream_model', model)
@@ -19,12 +18,12 @@ def describe_capabilities(models):
             'search': {
                 'supported': profile.get('supports_search', False),
                 'default': profile.get('net_go', False),
-                'verification': 'request_and_stream_observed' if upstream == 'qwen-instruct' else 'not_verified',
+                'verification': 'captured_frontend_option',
             },
             'thinking': {
                 'supported': bool(profile.get('supports_thinking') and profile.get('enable_thinking')),
                 'default': profile.get('thinking', False),
-                'verification': 'request_observed' if upstream == 'Kimi-k3' else 'not_verified',
+                'verification': 'website_model_catalog',
             },
             'attachments': {
                 'images': {'supported': profile.get('supports_images', False),
@@ -35,18 +34,18 @@ def describe_capabilities(models):
                 'documents': {'supported': profile.get('supports_files', False), 'extensions': list(DOCUMENT_MIMES),
                               'max_bytes': MAX_FILE_BYTES, 'max_bytes_exclusive': True, 'multiple': True,
                               'scanned_documents': False, 'reference_field': 'fileIds',
-                              'format_basis': 'successful_synthetic_uploads_20261030_and_20261101',
-                              'format_verification_model': 'deepseek-pro',
+                              'format_basis': 'captured_frontend_file_picker',
                               'unconfirmed_formats': [],
-                              'upstream_rejected_formats': ['md', 'rtf', 'doc', 'xml']},
+                              'upstream_rejected_formats': ['doc', 'xml']},
             },
             'max_output_tokens': profile.get('max_tokens', 16384),
         })
     return {
         'object': 'gateway.capabilities', 'protocol_version': PROTOCOL_VERSION,
+        'configuration': {'source': 'website', 'cache_seconds': 300},
         'options': {'request_field': 'shanghaitech', 'search_scope': 'upstream_site',
-                    'sources_phase': 'after_chat_completion', 'sources_response_field': 'shanghaitech.sources',
-                    'independent_options': True},
+                    'sources_phase': 'stream_metadata', 'sources_response_field': 'shanghaitech.sources',
+                    'independent_options': True, 'progress_response_field': 'shanghaitech.search_progress'},
         'models': entries,
         'files': {'max_bytes': MAX_FILE_BYTES, 'ttl_seconds': FILE_TTL_SECONDS,
                   'attachment_contract_version': 2,
@@ -62,6 +61,9 @@ def describe_capabilities(models):
                   'upload_batch_transport': 'one_multipart_request_per_file_same_conversation_id',
                   'duplicate_policy': 'credential_model_group_mime_sha256',
                   'expired_reference_policy': 'reupload_from_dsh_source',
+                  'document_scope': 'current_turn', 'historical_documents': 'filename_only',
+                  'image_compression': {'max_side': 2048, 'trigger_bytes': 1024 * 1024,
+                      'jpeg_quality': 88, 'gif_passthrough': True, 'only_if_smaller': True},
                   'document_extensions': list(DOCUMENT_MIMES), 'image_mime_types': list(IMAGE_MIMES),
                   'model_bound': True, 'credential_bound': True, 'persistent': False,
                   'delete_scope': 'gateway_reference_only'},
@@ -79,7 +81,7 @@ def describe_capabilities(models):
                       'reuploads_attachments': False},
                   'empty_pdf_read_dispatch': 'explicit_named_tool_choice_only',
                   'verification': 'partial_read_and_command_roundtrips'},
-        'limits': {'max_history_messages': MAX_HISTORY_MESSAGES},
+        'limits': {'max_history_messages': message_round * 2 if message_round else None, 'message_round': message_round, 'system_prompt_outside_history_window': True},
         'usage': {'available': True, 'availability': 'when_reported_by_upstream',
                   'stream_opt_in': 'stream_options.include_usage', 'site_counters_separate': True},
         'conversations': {'request_field': 'conversation_id', 'persistent': False,

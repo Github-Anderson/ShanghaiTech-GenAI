@@ -18,6 +18,7 @@ from typing import Any
 import httpx
 
 from .protocol import GatewayError
+from .site_api import normalize_sources
 
 
 CHAT_URL = "https://genai.shanghaitech.edu.cn/htk/chat/start/chat"
@@ -264,6 +265,14 @@ def _normalise(
             502, "upstream_error", "The upstream service reported a business error.",
             retryable=kind == 'server_500',
         )
+    if "stage" in item:
+        stage = item["stage"]
+        if stage not in ("searching", "searched"):
+            return []
+        progress = {"stage": stage}
+        if type(item.get("count")) is int and item["count"] >= 0:
+            progress["count"] = item["count"]
+        return [{"search_progress": progress}]
     recognised = {
         "id", "object", "created", "model", "usage", "other", "promptTokens",
         "success", "code", "message", "timestamp", "system_fingerprint",
@@ -323,7 +332,18 @@ def _normalise(
             raise _protocol_error()
         metadata['upstream_metadata'] = {k: v for k, v in parsed_other.items()
             if k in ('promptTokens', 'totalTokens', 'completionTokens') and type(v) is int and v >= 0}
-        # other.totalTokens differs from usage.total_tokens in observed site events.
+        for key in ('contentId', 'answerGroupId'):
+            value = parsed_other.get(key)
+            if isinstance(value, str) and 0 < len(value) <= 256:
+                metadata['upstream_metadata'][key] = value
+        if 'netResults' in parsed_other:
+            try:
+                metadata['sources'] = normalize_sources(parsed_other['netResults'])
+                metadata['sources_status'] = 'ready'
+            except GatewayError:
+                metadata.update(sources_status='failed', sources_error='sources_protocol_error')
+        # Website counters remain distinct from the model's usage.
+
 
     finish = choice.get("finish_reason") or output_choice.get("finish_reason")
     if finish not in (None, "", "stop", "length"):
@@ -340,8 +360,6 @@ def _normalise(
         or item.get("isEnd") in (1, "1")
         or item.get("is_end") in (1, "1")
     ):
-        terminal = state.get("finish_reason", "stop")
-    elif root_ai_type == "azure" and other:
         terminal = state.get("finish_reason", "stop")
 
     events: list[dict[str, Any]] = []
@@ -368,7 +386,7 @@ async def stream_upstream(
     root_ai_type: str,
     token: str,
     idle_timeout: float = 90.0,
-    tail_timeout: float = 1.0,
+    tail_timeout: float = 5.0,
     timing=None,
     header_timeout: float | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
@@ -480,12 +498,15 @@ async def stream_upstream(
                         completion = event
                         if tail_deadline is None:
                             tail_deadline = time.monotonic() + tail_timeout
-                    elif 'content' in event or 'reasoning_content' in event:
+                    elif 'content' in event or 'reasoning_content' in event or 'search_progress' in event:
                         yield event
                     else:
                         for key in ('usage', 'upstream_metadata'):
                             if key in event:
                                 metadata.setdefault(key, {}).update(event[key])
+                        for key in ('sources', 'sources_status', 'sources_error'):
+                            if key in event:
+                                metadata[key] = event[key]
             await frames.aclose()
             if completion:
                 if timing:

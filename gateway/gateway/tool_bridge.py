@@ -477,14 +477,22 @@ If a command is denied, report the real exit code and error. Do not use Start-Pr
                           'Never put a tool request inside a GATEWAY_FINAL answer or a code example. '
                           'Only summarize an executed action after its real tool observation has arrived.')
             if data.get('model') == 'deepseek-pro':
-                # The text-only DeepSeek endpoint can return empty+stop when
-                # the full output protocol is in system. Controlled replays
-                # retain the exact catalog and history but succeed with the
-                # serialization protocol attached to the current user turn.
-                # Never promote user text or observations into system, and
-                # keep every existing decode/schema/approval check unchanged.
+                # DeepSeek can terminate without text for a bare tool envelope.
+                # Request ordinary fenced text; the existing decoder validates
+                # the complete JSON and schema before emitting any client call.
+                # Keep the catalog in system and the format on the current turn.
                 system.append(tool_catalog)
-                turn_protocol = tool_protocol
+                turn_protocol = tool_protocol.replace(
+                    'Return the tool JSON object alone, with no markdown fences or surrounding prose.',
+                    'Return the tool JSON object inside a Markdown code fence beginning with ```json '
+                    'and ending with ```. Serialize it as ordinary text; the client will decode it.')
+                workflow = self.tools.get('workflow', {}).get('parameters', {}).get('properties', {})
+                if 'script' in workflow and 'meta' in workflow:
+                    turn_protocol += (
+                        'For workflow, script and meta are sibling fields inside arguments. '
+                        'Put optional phases inside meta, not beside arguments. '
+                        'Prefer one-line JavaScript separated by semicolons; do not put literal '
+                        'backslash-n sequences between JavaScript statements.\n')
             else:
                 system.append(tool_protocol + tool_catalog)
         if system:
@@ -731,6 +739,8 @@ If a command is denied, report the real exit code and error. Do not use Start-Pr
                         yield event
                     return
                 async for event in upstream:
+                    if 'search_progress' in event:
+                        yield {'search_progress': event['search_progress']}
                     metadata.update({key: event[key] for key in
                         ('usage', 'upstream_metadata', 'sources', 'sources_status', 'sources_error',
                          'attachment_mode', 'tool_routing') if key in event})

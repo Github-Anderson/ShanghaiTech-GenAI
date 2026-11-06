@@ -66,6 +66,28 @@ class ToolRecoveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual('use the registered workflow tool' in current, available and choice == 'auto')
             self.assertTrue(current.startswith('Run ten tasks'))
 
+    async def test_deepseek_fenced_tools_preserve_arguments_and_validation(self):
+        data = {'model': 'deepseek-pro', 'tools': TOOLS,
+                'messages': [{'role': 'system', 'content': 'Caller policy'},
+                             {'role': 'user', 'content': 'Read the marker'}]}
+        instance = ToolBridge(data)
+        rewritten = instance.rewrite(data)
+        self.assertIn('Caller policy', rewritten['messages'][0]['content'])
+        self.assertIn('TOOL CATALOG:', rewritten['messages'][0]['content'])
+        self.assertIn('inside a Markdown code fence', rewritten['messages'][-1]['content'])
+        self.assertEqual(data['messages'][-1]['content'], 'Read the marker')
+        other = {**data, 'model': 'qwen-instruct'}
+        self.assertNotIn('inside a Markdown code fence', str(ToolBridge(other).rewrite(other)))
+        events = [e async for e in instance.convert(stream('```json\n' + VALID + '\n```'))]
+        args = json.loads(next(e['tool_calls'][0]['function']['arguments'] for e in events if 'tool_calls' in e))
+        self.assertEqual(args, CALL['tool_calls'][0]['arguments'])
+        malformed = {'type': 'tool_calls', 'tool_calls': [{'name': 'bash', 'arguments': {'command': 'echo marker'}}]}
+        with self.assertRaises(GatewayError) as caught:
+            instance.decode('```json\n' + json.dumps(malformed) + '\n```', 'stop')
+        self.assertEqual(caught.exception.code, 'tool_arguments_invalid')
+        with self.assertRaises(GatewayError):
+            instance.decode('```json\n' + VALID + '\n```', 'length')
+
     async def test_batch_overflow_reports_count_and_recovers_without_partial_calls(self):
         raw = json.dumps({'type': 'tool_calls', 'tool_calls': CALL['tool_calls'] * 10})
         instance = bridge()
@@ -295,19 +317,20 @@ class RecoveryServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service.pending, 0)
 
     async def test_sources_use_successful_correction_snapshot(self):
-        service = self.service(); calls, sources = [], []
+        service = self.service(); calls = []
         async def upstream(client, payload, *args, **kwargs):
             calls.append(copy.deepcopy(payload))
-            async for e in stream(BROKEN if len(calls) == 1 else VALID):
+            valid = len(calls) == 2
+            async for e in stream(VALID if valid else BROKEN):
+                if e.get('finish_reason'):
+                    yield {'sources_status': 'ready', 'sources': {'links': [], 'count': 2 if valid else 99}}
                 yield e
-        async def fetch(client, payload, *args):
-            sources.append(payload)
-            return {'links': [], 'count': 0}
-        with patch('gateway.app.stream_upstream', upstream), patch('gateway.app.fetch_sources', fetch):
-            events = [e async for e in service.generate({'chatInfo': 'Question', 'aiType': 'deepseek-pro'},
-                        'xinference', 'synthetic-token', object(), bridge=bridge())]
-        self.assertEqual(sources, [calls[1]])
-        self.assertTrue(any(e.get('sources_status') == 'ready' for e in events))
+        with patch('gateway.app.stream_upstream', upstream):
+            events = [e async for e in service.generate({'chatInfo': 'Question', 'aiType': 'deepseek-pro', 'netGo': True},
+                        'xinference', 'synthetic-token', None, bridge=bridge())]
+        self.assertEqual(len(calls), 2)
+        sources = [e['sources'] for e in events if 'sources' in e]
+        self.assertEqual(sources, [{'links': [], 'count': 2}])
 
     async def test_http_streaming_and_nonstreaming_success_and_failure(self):
         for streaming in [False, True]:

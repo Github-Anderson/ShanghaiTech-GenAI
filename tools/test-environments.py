@@ -45,6 +45,20 @@ class EnvironmentTests(unittest.TestCase):
         local.write_json(self.runtime / 'environment.json', args.settings)
         local.write_json(self.runtime / 'sync-state.json', dict(environment=args.settings, gateway={'commit':'synthetic', 'dirty':True}, gateway_files={}, plugin_files={}, **extra))
 
+    def test_authentication_before_first_website_login(self):
+        import urllib.error
+        key = self.root / 'synthetic.key'
+        key.write_text('synthetic-key-' * 4)
+        def request(path, supplied=None, base=None):
+            if supplied != key.read_text():
+                raise urllib.error.HTTPError('http://local', 401, 'Unauthorized', {}, None)
+            self.assertEqual(path, '/v1/credentials/status')
+            return {'logged_in': False}
+        with patch.object(local, 'client_gateway', return_value=('http://local', key, False)), patch.object(local, 'request', request):
+            result = local.check_auth(self.runtime / 'deploy')
+        self.assertEqual(result['authentication'], 'passed')
+        self.assertIsNone(result['models'])
+
     def test_connection_replacement_is_explicit_and_not_persisted(self):
         for explicit in [None, 'http://127.0.0.1:8000/v1']:
             args = self.args(gateway_url=explicit)

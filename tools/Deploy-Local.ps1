@@ -44,9 +44,12 @@ try {
 $key = [IO.File]::ReadAllText($gateway.KeyFile).Trim()
 try {
     $headers = @{ Authorization = 'Bearer ' + $key }
-    $models = Invoke-RestMethod ($gateway.BaseUrl + '/models') -Headers $headers
     $credentials = Invoke-RestMethod ($gateway.BaseUrl + '/credentials/status') -Headers $headers
-    Write-Host ('Authenticated model listing OK: ' + $models.data.Count + ' models.')
-    Write-Host ('Website credentials present: ' + $credentials.logged_in + '; upstream not validated.')
+    if ($credentials.logged_in) {
+        $models = Invoke-RestMethod ($gateway.BaseUrl + '/models') -Headers $headers
+        Write-Host ('Authenticated website model catalog: ' + $models.data.Count + ' models; real generation not validated.')
+    } else {
+        Write-Host 'Authentication OK. Import website credentials in the gateway page to load the model catalog.'
+    }
 } finally { $key = $null; $headers = $null }
 Write-Host 'Local deployment complete. Fully restart DSH to load the updated plugin.'

@@ -14,6 +14,7 @@ from .protocol import GatewayError
 class Settings:
     gateway_key_file: Path
     models: dict = field(default_factory=dict)
+    dynamic_site_config: bool = False  # Programmatic offline fixtures may supply models.
     connect_timeout_seconds: float = 10.0
     read_timeout_seconds: float = 90.0
     total_timeout_seconds: float = 300.0
@@ -52,32 +53,16 @@ def load_settings() -> Settings:
                 raise ValueError()
             path = Path(value).expanduser()
             paths[key] = path if path.is_absolute() else config_path.resolve().parent / path
-        raw_models = data["models"]
+        raw_models = data.get("models", {})
         if not isinstance(raw_models, dict):
             raise ValueError()
         models = {}
         for name, profile in raw_models.items():
             if not isinstance(name, str) or not isinstance(profile, dict):
                 raise ValueError()
-            if not profile.get("enabled", True):
-                continue
-            if profile.get("root_ai_type") not in {"azure", "xinference"}:
+            if type(profile.get("enabled", True)) is not bool:
                 raise ValueError()
-            limit = profile.get("max_tokens", 16384)
-            if type(limit) is not int or not 1 <= limit <= 16384:
-                raise ValueError()
-            if type(profile.get("enable_thinking", False)) is not bool or type(profile.get("thinking", False)) is not bool:
-                raise ValueError()
-            if any(type(profile.get(k, False)) is not bool for k in ['supports_images', 'supports_files', 'supports_search', 'supports_thinking']):
-                raise ValueError()
-            if type(profile.get('net_go', False)) is not bool:
-                raise ValueError()
-            upstream_model = profile.get('upstream_model', name)
-            if not isinstance(upstream_model, str) or not upstream_model.strip():
-                raise ValueError()
-            models[name] = dict(profile)
-        if not models:
-            raise ValueError()
+            models[name] = {"enabled": profile.get("enabled", True)}
         options = {}
         for key, value in [("connect_timeout_seconds", 10), ("read_timeout_seconds", 90), ("total_timeout_seconds", 300), ("queue_timeout_seconds", 30)]:
             number = data.get(key, value)
@@ -100,7 +85,7 @@ def load_settings() -> Settings:
             if (parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password
                     or parsed.query or parsed.fragment or parsed.path not in ('', '/')):
                 raise ValueError()
-        return Settings(**paths, upstream_proxy_url=proxy, models=models, max_waiting_requests=waiting,
+        return Settings(**paths, dynamic_site_config=True, upstream_proxy_url=proxy, models=models, max_waiting_requests=waiting,
                         max_concurrent_requests=concurrent, **options)
     except (OSError, ValueError, TypeError, KeyError):
         raise GatewayError(503, "configuration_required", "Create config/local.json using the example and configure protected file paths.") from None
