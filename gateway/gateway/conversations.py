@@ -1,4 +1,4 @@
-"""Conversation mappings plus a durable deletion ledger; no messages or tokens."""
+"""Conversation mappings, site counters and deletion ledger; no messages or credentials."""
 import asyncio
 import hashlib
 import json
@@ -28,6 +28,7 @@ class Conversations:
         self.groups = {}
         self.history = {}
         self.deleted = set()
+        self.prompt_tokens = {}
         self.locks = weakref.WeakValueDictionary()
         if path is not None:
             try:
@@ -49,6 +50,8 @@ class Conversations:
                     self.history[group] = key
                     if time.time() - touched < TTL_SECONDS:
                         self.groups[key] = (group, touched)
+                self.prompt_tokens = {g:n for g,n in data.get('prompt_tokens', {}).items()
+                                      if g in self.history and type(n) is int and n >= 0}
                 for owner, local in data['deleted']:
                     if not isinstance(owner, str) or len(owner) != 64 or validate_conversation_id(local) is None:
                         raise ValueError()
@@ -69,7 +72,7 @@ class Conversations:
                      if self.groups.get(key, (None,))[0] == group else 0]
                     for group, key in self.history.items()]
             with os.fdopen(fd, 'w', encoding='utf8') as out:
-                json.dump({'version': 1, 'groups': rows, 'deleted': sorted(self.deleted)}, out)
+                json.dump({'version': 1, 'groups': rows, 'deleted': sorted(self.deleted), 'prompt_tokens': self.prompt_tokens}, out)
                 out.flush()
                 os.fsync(out.fileno())
             os.replace(temporary, self.path)
@@ -107,6 +110,19 @@ class Conversations:
         self.groups[key] = (group, now)
         return group
 
+    def update_prompt_tokens(self, group, count):
+        if group in self.history:
+            old = self.prompt_tokens.get(group)
+            self.prompt_tokens[group] = count
+            try:
+                self.save()
+            except BaseException:
+                if old is None:
+                    self.prompt_tokens.pop(group, None)
+                else:
+                    self.prompt_tokens[group] = old
+                raise
+
     def deletion_plan(self, token, ids):
         owner = hashlib.sha256(token.encode()).hexdigest()
         known = {key[2] for key in self.history.values() if key[0] == owner}
@@ -117,16 +133,17 @@ class Conversations:
 
     def confirm_deleted(self, token, ids):
         owner = hashlib.sha256(token.encode()).hexdigest()
-        old = (self.groups.copy(), self.history.copy(), self.deleted.copy())
+        old = (self.groups.copy(), self.history.copy(), self.deleted.copy(), self.prompt_tokens.copy())
         self.groups = {k: v for k, v in self.groups.items() if not (k[0] == owner and k[2] in ids)}
         self.history = {g: k for g, k in self.history.items() if not (k[0] == owner and k[2] in ids)}
+        self.prompt_tokens = {g:n for g,n in self.prompt_tokens.items() if g in self.history}
         self.deleted.update((owner, local) for local in ids)
         # Idempotency receipts are bounded; expired receipts never authorize a remote delete.
         self.deleted = set(sorted(self.deleted)[-MAX_SAVED_GROUPS:])
         try:
             self.save()
         except BaseException:
-            self.groups, self.history, self.deleted = old
+            self.groups, self.history, self.deleted, self.prompt_tokens = old
             raise
 
     @asynccontextmanager

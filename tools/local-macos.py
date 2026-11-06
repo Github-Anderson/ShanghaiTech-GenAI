@@ -250,11 +250,17 @@ def check_auth(deploy):
                 raise
         else:
             raise RuntimeError('Unauthenticated model listing was accepted')
-    models = request('/v1/models', key, base)
     credentials = request('/v1/credentials/status', key, base)
-    print(f"Authentication OK: missing/invalid key rejected, valid key lists {len(models['data'])} models.")
-    print(f"Website credentials present: {credentials['logged_in']}; upstream not validated.")
-    return {'models': len(models['data']), 'credentials': credentials, 'authentication': 'passed'}
+    model_count = None
+    if credentials['logged_in']:
+        models = request('/v1/models', key, base)
+        model_count = len(models['data'])
+    print("Authentication OK: missing/invalid key rejected, valid key accepted.")
+    if model_count is None:
+        print("Import website credentials in the gateway page to load the model catalog.")
+    else:
+        print(f"Website model catalog: {model_count} models; real generation not validated.")
+    return {'models': model_count, 'credentials': credentials, 'authentication': 'passed'}
 
 
 def deploy(args):
@@ -460,7 +466,7 @@ def compose_command(deploy):
     settings = environment_for(deploy)
     env = dict(os.environ, GENAI_BIND_ADDRESS=settings.get('bind_address', '127.0.0.1'),
                GENAI_HOST_PORT=str(settings.get('port', 8000)),
-               GENAI_IMAGE_TAG=settings.get('image_tag', '1.0.9'))
+               GENAI_IMAGE_TAG=settings.get('image_tag', '1.1.0'))
     command = ['docker', 'compose', '-f', str(deploy / 'compose.yaml')]
     if settings.get('compose_override'):
         command += ['-f', settings['compose_override']]

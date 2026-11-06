@@ -127,7 +127,7 @@ def read_signing_salt(path):
         return salt
     except (OSError, ValueError, TypeError, KeyError, UnicodeError):
         raise GatewayError(503, 'upstream_signing_required',
-                           'Configure the separate site signing file for search-enabled requests.') from None
+                           'Configure website signing material to load the model catalog and chat settings.') from None
 
 
 class BrowserCredentials:

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import copy
 import hmac
 import json
 import logging
@@ -15,22 +14,25 @@ from email import policy
 
 import anyio
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Query
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 from .credentials import read_gateway_key
 from .browser_credentials import BrowserCredentialStore, BrowserCredentials, MAX_IMPORT_BYTES, invalid
 from .attachments import Attachments, MAX_FILE_BYTES, MAX_IMAGE_BYTES, bad
-from .protocol import GatewayError, build_upstream_payload, error_body, make_chunk, make_completion
+from .protocol import GatewayError, trim_history, build_upstream_payload, error_body, make_chunk, make_completion
 from .settings import load_settings
+from .site_config import SiteCatalog, SiteConfig
 from .upstream import stream_upstream
-from .site_api import fetch_sources, delete_site_conversation
+from .site_api import delete_site_conversation
 from .tool_bridge import ToolBridge, MAX_OUTPUT_CHARS
 from .capabilities import describe_capabilities, PROTOCOL_VERSION
 from .conversations import Conversations, validate_conversation_id
 from .timings import ImageTimings, timed_output
 from . import __version__
+from .audit import AuditStore, AuditMiddleware, request_summary
+from .admin import snapshot, probe_connections
 
 MAX_REQUEST_BYTES = 32 * 1024 * 1024
 logger = logging.getLogger(__name__)
@@ -56,9 +58,19 @@ class Service:
         self.attachments = Attachments()
         journal = self.credential_store.path.with_name('conversations.json') if self.credential_store.path else None
         self.conversations = Conversations(journal)
+        self.audit = AuditStore(journal.with_name('admin.sqlite3') if journal else None)
+        self.started = time.monotonic()
+        self.last_probe = self.probe_identity = None
+        self.probe_lock = asyncio.Lock()
         self.deleting = False
         self.semaphore = asyncio.Semaphore(settings.max_concurrent_requests)
         self.pending = 0
+        self.catalog = SiteCatalog(client, self.credentials, settings.models)
+
+    async def site_config(self, *, refresh=False):
+        if getattr(self.settings, "dynamic_site_config", False):
+            return await self.catalog.get(refresh=refresh)
+        return SiteConfig(self.settings.models)
 
     @asynccontextmanager
     async def slot(self):
@@ -80,14 +92,16 @@ class Service:
                 self.semaphore.release()
             self.pending -= 1
 
-    async def events(self, payload, root_ai_type, attachment_plan=None, public_model=None, conversation_id=None, timing=None, bridge=None):
+    async def events(self, payload, root_ai_type, attachment_plan=None, public_model=None, conversation_id=None, timing=None, bridge=None, config=None):
         waiting = time.monotonic()
         async with self.slot():
             if timing:
                 timing.elapsed('queue_wait_ms', waiting)
             preparing = time.monotonic()
             token = await asyncio.to_thread(self.credentials.get_token)
-            signing = await asyncio.to_thread(self.credentials.get_signing, token) if payload.get('netGo') else None
+            signing = None
+            config = config or SiteConfig(self.settings.models)
+            config.check_token(token)
             bound_group = None
             if conversation_id is not None:
                 bound_group = self.conversations.group_for(token, public_model or payload['aiType'], conversation_id)
@@ -98,11 +112,12 @@ class Service:
                 if timing:
                     timing.elapsed('credentials_ms', preparing)
                 preparing = time.monotonic()
-                payload = await self.attachments.materialize(self.client, self.settings.models, public_model or payload['aiType'], attachment_plan, payload, token, image_token, bound_group=bound_group, **({'timing': timing} if timing else {}))
+                payload = await self.attachments.materialize(self.client, config.models, public_model or payload['aiType'], attachment_plan, payload, token, image_token, bound_group=bound_group, image_base=config.image_base, **({'timing': timing} if timing else {}))
                 if timing:
                     timing.elapsed('attachment_materialize_ms', preparing)
             waiting = time.monotonic()
             async with self.conversations.lock_group(payload['chatGroupId']):
+                payload = {**payload, 'promptTokens': self.conversations.prompt_tokens.get(payload['chatGroupId'], 0)}
                 if timing:
                     timing.elapsed('conversation_wait_ms', waiting)
                 if attachment_plan and self.attachments.mixed_native_mode(attachment_plan):
@@ -110,6 +125,9 @@ class Service:
                 generated = self.generate(payload, root_ai_type, token, signing, bridge=bridge, **({'timing': timing} if timing else {}))
                 try:
                     async for event in generated:
+                        counter = event.get("upstream_metadata", {}).get("promptTokens")
+                        if type(counter) is int and counter >= 0:
+                            self.conversations.update_prompt_tokens(payload["chatGroupId"], counter)
                         yield event
                 finally:
                     with anyio.CancelScope(shield=True):
@@ -159,13 +177,11 @@ class Service:
                 await asyncio.sleep(0.25)
 
     async def generate(self, payload, root_ai_type, token, signing, timing=None, bridge=None):
-        source_snapshot = copy.deepcopy(payload)
+        sources_seen = False
         upstream = self.generation_stream(payload, root_ai_type, token, **({'timing': timing} if timing else {}))
         if bridge is not None:
             def retry(raw, error):
-                nonlocal source_snapshot
                 corrected = bridge.correction_payload(payload, raw, error)
-                source_snapshot = copy.deepcopy(corrected)
                 return self.generation_stream(corrected, root_ai_type, token, **({'timing': timing} if timing else {}))
             upstream = bridge.convert(upstream, retry=retry)
         deadline = time.monotonic() + self.settings.total_timeout_seconds
@@ -184,19 +200,11 @@ class Service:
                 size += len(event.get("content", "")) + len(event.get("reasoning_content", ""))
                 if size > MAX_OUTPUT_CHARS:
                     raise GatewayError(502, "upstream_output_limit", "The ShanghaiTech GenAI output size limit was reached.")
+                if event.get('sources_status'):
+                    sources_seen = True
                 if event.get("finish_reason"):
-                    if signing is not None:
-                        try:
-                            remaining = deadline - time.monotonic()
-                            if remaining <= 0:
-                                raise TimeoutError()
-                            sources = await asyncio.wait_for(fetch_sources(
-                                self.client, source_snapshot, token, signing), remaining)
-                            yield {'sources': sources, 'sources_status': 'ready'}
-                        except GatewayError as error:
-                            yield {'sources_status': 'failed', 'sources_error': error.code}
-                        except TimeoutError:
-                            yield {'sources_status': 'failed', 'sources_error': 'sources_timeout'}
+                    if payload.get('netGo') and not sources_seen:
+                        yield {'sources_status': 'failed', 'sources_error': 'upstream_sources_missing'}
                     yield event
                     return
                 yield event
@@ -232,6 +240,8 @@ async def lifespan(app):
     try:
         yield
     finally:
+        if app.state.service is not None:
+            app.state.service.audit.close()
         if client is not None:
             await client.aclose()
 
@@ -239,8 +249,12 @@ async def lifespan(app):
 app = FastAPI(title="ShanghaiTech GenAI", version=__version__, lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
 
+app.add_middleware(AuditMiddleware)
+
+
 @app.exception_handler(GatewayError)
 async def gateway_error_handler(request, error):
+    record_error(request, error)
     return JSONResponse(error_body(error), status_code=error.status_code, headers={"Cache-Control": "no-store"})
 
 
@@ -248,6 +262,18 @@ async def gateway_error_handler(request, error):
 async def unexpected_error_handler(request, error):
     safe = GatewayError(500, "internal_error", "ShanghaiTech GenAI encountered an internal error. No upstream details were logged.")
     return JSONResponse(error_body(safe), status_code=500, headers={"Cache-Control": "no-store"})
+
+
+def record_error(request, error):
+    row = getattr(request.state, 'audit', None)
+    if row is not None:
+        row.update(outcome='failed', error_code=error.code)
+    service = getattr(request.app.state, 'service', None)
+    if service and getattr(request.state, 'authorized', False) and request.url.path in ('/v1/credentials/import', '/v1/credentials/logout'):
+        service.audit.login('credential_import' if request.url.path.endswith('/import') else 'credential_logout', 'failed', error.code)
+    if service and error.code in ('upstream_authentication_required', 'upstream_login_required'):
+        service.last_probe = None
+        service.audit.login('credential_rejected', 'failed', error.code)
 
 
 def get_service(request):
@@ -264,9 +290,13 @@ async def authorize(request):
     scheme, _, provided = value.partition(" ")
     if scheme.lower() != "bearer" or not provided.isascii() or not hmac.compare_digest(provided, key):
         raise GatewayError(401, "invalid_api_key", "A valid local gateway API key is required.")
+    request.state.authorized = True
     return service
 
 
+@app.get('/status', include_in_schema=False)
+@app.get('/log', include_in_schema=False)
+@app.get('/test', include_in_schema=False)
 @app.get("/", include_in_schema=False)
 async def home():
     return FileResponse(Path(__file__).parent / "static" / "index.html", headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff"})
@@ -281,6 +311,56 @@ async def health():
 async def credential_import_script():
     return FileResponse(Path(__file__).parent / 'static' / 'credential-import.js',
                         media_type='text/javascript', headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/style.css', include_in_schema=False)
+async def console_styles():
+    return FileResponse(Path(__file__).parent / 'static' / 'style.css', media_type='text/css', headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/admin.js', include_in_schema=False)
+async def admin_script():
+    return FileResponse(Path(__file__).parent / 'static' / 'admin.js', media_type='text/javascript', headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/test.js', include_in_schema=False)
+async def test_script():
+    return FileResponse(Path(__file__).parent / 'static' / 'test.js', media_type='text/javascript', headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/v1/admin/status')
+async def admin_status(request: Request):
+    return JSONResponse(snapshot(await authorize(request)), headers={'Cache-Control': 'no-store'})
+
+
+@app.post('/v1/admin/probe')
+async def admin_probe(request: Request):
+    service = await authorize(request)
+    origin = request.headers.get('origin')
+    if origin and origin != f'{request.url.scheme}://{request.url.netloc}':
+        raise GatewayError(403, 'invalid_probe_origin', 'Run the check from the gateway page.')
+    try:
+        result = await probe_connections(service)
+    except TimeoutError:
+        raise GatewayError(504, 'probe_timeout', 'The connection check timed out.') from None
+    return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/v1/admin/logs')
+async def admin_logs(request: Request, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
+                     category: str = Query('', pattern='^(|api|management)$'),
+                     outcome: str = Query('', pattern='^(|complete|failed|cancelled)$')):
+    service = await authorize(request)
+    result = service.audit.rows('request', offset, limit, category, outcome)
+    # Do not include this log-read request in the running list.
+    result['active'] = [dict(row) for row in service.audit.active.values() if row is not getattr(request.state, 'audit', None)]
+    return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/v1/admin/login-history')
+async def login_history(request: Request, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
+    service = await authorize(request)
+    return JSONResponse(service.audit.rows('login', offset, limit), headers={'Cache-Control': 'no-store'})
 
 
 @app.post('/v1/credentials/import')
@@ -303,6 +383,8 @@ async def import_browser_credentials(request: Request):
     # A small synchronous atomic write keeps the credential switch indivisible
     # with respect to other handlers in this single-worker gateway.
     result = service.credential_store.save(data)
+    service.last_probe = None
+    service.audit.login('credential_import', 'saved')
     return JSONResponse(result, headers={'Cache-Control': 'no-store'})
 
 
@@ -325,6 +407,8 @@ async def logout_browser_credentials(request: Request):
     if service.pending:
         raise GatewayError(409, 'credentials_in_use', 'Wait for active or queued chat requests to finish before logging out.')
     result = service.credential_store.logout()
+    service.last_probe = None
+    service.audit.login('credential_logout', 'complete')
     service.attachments = Attachments()
     service.conversations = Conversations(service.conversations.path)
     return JSONResponse(result, headers={'Cache-Control': 'no-store'})
@@ -338,9 +422,10 @@ async def ready(request: Request):
 
 
 @app.get("/v1/models")
-async def models(request: Request):
+async def models(request: Request, refresh: bool = False):
     service = await authorize(request)
-    body = {"object": "list", "data": [{"id": name, "name": profile.get('display_name', name), "object": "model", "created": 0, "owned_by": "ShanghaiTech"} for name, profile in service.settings.models.items()]}
+    config = await service.site_config(refresh=refresh)
+    body = {"object": "list", "data": [{"id": name, "name": profile.get('display_name', name), "object": "model", "created": 0, "owned_by": "ShanghaiTech"} for name, profile in config.models.items()]}
     return JSONResponse(body, headers={"Cache-Control": "no-store"})
 
 
@@ -400,9 +485,10 @@ async def delete_conversation_batch(request: Request):
 
 
 @app.get('/v1/capabilities')
-async def capabilities(request: Request):
+async def capabilities(request: Request, refresh: bool = False):
     service = await authorize(request)
-    return JSONResponse(describe_capabilities(service.settings.models), headers={'Cache-Control': 'no-store'})
+    config = await service.site_config(refresh=refresh)
+    return JSONResponse(describe_capabilities(config.models, config.message_round), headers={'Cache-Control': 'no-store'})
 
 
 async def read_limited(request, limit):
@@ -447,19 +533,21 @@ async def upload_file(request: Request):
                 raise bad('Invalid multipart metadata.') from None
     if not uploaded or fields.get('purpose', 'user_data') != 'user_data':
         raise bad('Supply one file and purpose=user_data.')
+    config = await service.site_config()
     model = fields.get('model')
-    if not isinstance(model, str) or model not in service.settings.models:
+    if not isinstance(model, str) or model not in config.models:
         raise bad('Supply the selected gateway model in the model field.')
     conversation_id = validate_conversation_id(fields.get('conversation_id'))
     if fields.get('include_content', 'true') not in ('true', 'false'):
         raise bad('include_content must be true or false.')
-    kind, _ = service.attachments.validate_file(*uploaded, model, service.settings.models)
+    kind, _ = service.attachments.validate_file(*uploaded, model, config.models)
     async with service.slot():
         token = await asyncio.to_thread(service.credentials.get_token)
+        config.check_token(token)
         image_token = await service.image_token() if kind == 'image' else None
         group = service.conversations.group_for(token, model, conversation_id) if conversation_id is not None else None
         async with service.conversations.lock_group(group or '__unbound_upload__'):
-            record = await service.attachments.upload(service.client, service.settings.models, model, *uploaded, token, image_token, chat_group_id=group)
+            record = await service.attachments.upload(service.client, config.models, model, *uploaded, token, image_token, chat_group_id=group, image_base=config.image_base)
     return JSONResponse(record.public(include_content=fields.get('include_content') != 'false'), headers={'Cache-Control': 'no-store'})
 
 
@@ -498,7 +586,7 @@ def sse(data):
 def collect_metadata(target, event):
     if 'usage' in event:
         target['usage'] = event['usage']
-    for key in ('sources', 'sources_status', 'sources_error', 'upstream_metadata', 'tool_routing', 'attachment_mode', 'timings'):
+    for key in ('sources', 'sources_status', 'sources_error', 'search_progress', 'upstream_metadata', 'tool_routing', 'attachment_mode', 'timings'):
         if key in event:
             target.setdefault('shanghaitech', {})[key] = event[key]
 
@@ -524,18 +612,21 @@ async def completions(request: Request):
     service = await authorize(request)
     data = await read_request(request)
     bridge = ToolBridge(data)
-    adapted = bridge.rewrite(data)
-    rewritten, attachment_plan = service.attachments.plan(adapted, service.settings.models)
-    payload, model = build_upstream_payload(rewritten, service.settings.models)
+    config = await service.site_config()
+    if hasattr(request.state, 'audit'):
+        request.state.audit.update(request_summary(data, config.models))
+    adapted = trim_history(bridge.rewrite(data), config.message_round)
+    rewritten, attachment_plan = service.attachments.plan(adapted, config.models)
+    payload, model = build_upstream_payload(rewritten, config.models, config.message_round)
     has_images = any(isinstance(ref, tuple) or ref.kind == 'image' for refs in attachment_plan.values() for ref in refs)
     timing = ImageTimings(started) if has_images else None
     if timing:
         timing.elapsed('request_prepare_ms', started)
         timing.count('upstream_request_bytes', len(json.dumps(payload, ensure_ascii=False).encode('utf8')))
         timing.count('tool_count', len(bridge.tools))
-    root = service.settings.models[model]["root_ai_type"]
+    root = config.models[model]["root_ai_type"]
     options = {'conversation_id': data['conversation_id']} if data.get('conversation_id') is not None else {}
-    source_events = service.events(payload, root, attachment_plan, model, bridge=bridge, **options, **({'timing': timing} if timing else {}))
+    source_events = service.events(payload, root, attachment_plan, model, bridge=bridge, config=config, **options, **({'timing': timing} if timing else {}))
     events = timed_output(source_events, timing)
     response_id = "chatcmpl-" + secrets.token_hex(12)
     created = int(time.time())
@@ -608,6 +699,10 @@ async def completions(request: Request):
                 delta = {key: event[key] for key in ["content", "reasoning_content", "tool_calls"] if key in event}
                 if delta:
                     yield sse(make_chunk(response_id, created, model, delta))
+                if "search_progress" in event:
+                    progress = make_chunk(response_id, created, model, {})
+                    progress.update(choices=[], shanghaitech={"search_progress": event["search_progress"]})
+                    yield sse(progress)
                 if event.get("finish_reason"):
                     final = make_chunk(response_id, created, model, {}, finish_reason=event["finish_reason"])
                     if 'shanghaitech' in metadata:
@@ -624,11 +719,14 @@ async def completions(request: Request):
                 except StopAsyncIteration:
                     raise GatewayError(502, "upstream_incomplete", "The upstream stream ended without a recognized completion signal.") from None
         except GatewayError as error:
+            record_error(request, error)
             yield sse(error_body(error))
         except asyncio.CancelledError:
             raise
         except Exception:
-            yield sse(error_body(GatewayError(502, "upstream_stream_error", "The upstream stream could not be completed.")))
+            error = GatewayError(502, 'upstream_stream_error', 'The upstream stream could not be completed.')
+            record_error(request, error)
+            yield sse(error_body(error))
         finally:
             await close_events(events)
 

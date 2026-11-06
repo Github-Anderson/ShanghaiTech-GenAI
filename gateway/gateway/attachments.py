@@ -9,6 +9,8 @@ import base64
 import asyncio
 import binascii
 import hashlib
+import io
+from PIL import Image, ImageOps
 import json
 import secrets
 import time
@@ -23,20 +25,21 @@ from .protocol import GatewayError, MAX_INPUT_BYTES, _new_conversation_id
 from .site_api import read_site_json
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
-MAX_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_FILES = 64
 FILE_TTL_SECONDS = 3600
 IMAGE_ORIGIN = "https://genaipic.shanghaitech.edu.cn"
 STATIC_PREFIX = IMAGE_ORIGIN + "//sys/common/static/"
 IMAGE_MIMES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
-# Conservative allowlist: successful synthetic uploads, not inferred from labels.
+# Document extensions accepted by the captured website file picker.
 DOCUMENT_MIMES = {'.pdf': 'application/pdf', '.txt': 'text/plain', '.csv': 'text/csv',
                   '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                   '.xls': 'application/vnd.ms-excel',
                   '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                   '.ppt': 'application/vnd.ms-powerpoint',
                   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-                  '.html': 'text/html', '.json': 'application/json'}
+                  '.html': 'text/html', '.htm': 'text/html', '.json': 'application/json',
+                  '.md': 'text/markdown', '.markdown': 'text/markdown', '.log': 'text/plain'}
 
 
 def bad(message):
@@ -71,6 +74,32 @@ class Attachment:
         elif include_content:
             data["parsed_content"] = self.parsed_content
         return data
+
+
+def compress_image(name, mime, data):
+    """Mirror canvas compression: 2048 px, JPEG .88, only retain smaller output."""
+    if mime == 'image/gif':
+        return name, mime, data
+    try:
+        with Image.open(io.BytesIO(data)) as source:
+            if max(source.size) <= 2048 and len(data) <= 1024 * 1024:
+                return name, mime, data
+            source = ImageOps.exif_transpose(source)
+            scale = min(1, 2048 / max(source.size))
+            size = tuple(max(1, int(side * scale + .5)) for side in source.size)
+            rgba = source.convert('RGBA').resize(size, Image.Resampling.LANCZOS)
+            target = Image.new('RGB', size, 'white')
+            target.paste(rgba, mask=rgba.getchannel('A'))
+            out = io.BytesIO()
+            target.save(out, format='JPEG', quality=88)
+            packed = out.getvalue()
+            if len(packed) < len(data):
+                return str(PurePosixPath(name).with_suffix('.jpg')), 'image/jpeg', packed
+    except (OSError, ValueError):
+        pass  # Like the browser, leave undecodable files to the upload service.
+    except Image.DecompressionBombError:
+        raise bad('Image dimensions exceed the safe decoding limit.') from None
+    return name, mime, data
 
 
 class Attachments:
@@ -109,10 +138,10 @@ class Attachments:
         suffix = PurePosixPath(filename.replace('\\', '/')).suffix.lower()
         kind = "image" if mime in IMAGE_MIMES else "document" if suffix in DOCUMENT_MIMES and mime in (DOCUMENT_MIMES[suffix], 'application/octet-stream') else ""
         if not kind:
-            raise bad("Verified uploads: PNG, JPEG, WebP, GIF images; PDF, TXT, CSV, DOCX, XLS, XLSX, PPT, PPTX, HTML and JSON documents. Other document formats are unconfirmed or unsupported.")
+            raise bad("Website uploads: PNG, JPEG, WebP, GIF images; PDF, TXT, CSV, DOCX, XLS, XLSX, PPT, PPTX, HTML, HTM, MD, MARKDOWN, JSON and LOG documents.")
         limit = MAX_IMAGE_BYTES if kind == 'image' else MAX_FILE_BYTES
         if not data or len(data) >= limit:
-            raise GatewayError(413, "attachment_size_limit", "Upload a nonempty image below 20 MiB or document below 10 MiB, matching the website's strict size check.")
+            raise GatewayError(413, "attachment_size_limit", "Upload a nonempty image below 10 MiB or document below 10 MiB, matching the website's strict size check.")
         profile = models.get(model, {})
         if not profile.get("supports_images" if kind == "image" else "supports_files", False):
             raise bad("This attachment kind is not enabled for the selected model. Consult /v1/capabilities.")
@@ -123,7 +152,7 @@ class Attachments:
                  kind == 'document' and (suffix == '.pdf' and data.startswith(b'%PDF-') or
                                          suffix in ('.docx', '.xlsx', '.pptx') and data.startswith(b'PK\x03\x04') or
                                          suffix in ('.xls', '.ppt') and data.startswith(b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1') or
-                                         suffix in ('.txt', '.csv', '.html', '.json') and b'\x00' not in data))
+                                         suffix in ('.txt', '.csv', '.html', '.htm', '.json', '.md', '.markdown', '.log') and b'\x00' not in data))
         if not valid:
             raise bad("File bytes do not match the declared media type.")
         name = PurePosixPath(filename.replace('\\', '/')).name
@@ -131,24 +160,24 @@ class Attachments:
             raise bad("Choose a valid filename with at most 180 characters.")
         return kind, name
 
-    async def upload(self, client, models, model, filename, mime, data, token, image_token=None, *, chat_group_id=None, timing=None):
+    async def upload(self, client, models, model, filename, mime, data, token, image_token=None, *, chat_group_id=None, timing=None, image_base=IMAGE_ORIGIN + "/"):
         kind, _ = self.validate_file(filename, mime, data, model, models)
         group = (chat_group_id or _new_conversation_id()) if kind == 'document' else ''
-        key = (hashlib.sha256(token.encode()).hexdigest(), model, group, mime, hashlib.sha256(data).hexdigest())
+        key = (hashlib.sha256(token.encode()).hexdigest(), model, group, mime, hashlib.sha256(data).hexdigest(), image_base)
         lock = self.upload_locks.get(key)
         if lock is None:
             lock = asyncio.Lock()
             self.upload_locks[key] = lock
         async with lock:
             return await self._upload(client, models, model, filename, mime, data, token, image_token,
-                                      chat_group_id=group, timing=timing)
+                                      chat_group_id=group, timing=timing, image_base=image_base)
 
-    async def _upload(self, client, models, model, filename, mime, data, token, image_token=None, *, chat_group_id=None, timing=None):
+    async def _upload(self, client, models, model, filename, mime, data, token, image_token=None, *, chat_group_id=None, timing=None, image_base=IMAGE_ORIGIN + "/"):
         preparing = time.monotonic()
         kind, name = self.validate_file(filename, mime, data, model, models)
         self.prune()
         fingerprint = hashlib.sha256(token.encode()).hexdigest()
-        digest = (fingerprint, model, hashlib.sha256(data).hexdigest())
+        digest = (fingerprint, model, hashlib.sha256(data).hexdigest(), image_base)
         if timing and kind == 'image':
             timing.elapsed('image_prepare_ms', preparing, add=True)
             timing.count('image_bytes', len(data))
@@ -169,7 +198,7 @@ class Attachments:
             if not image_token:
                 raise GatewayError(503, "image_credentials_required", "Import the website image credentials in the gateway page.")
             headers["token"] = image_token
-            url = IMAGE_ORIGIN + "//sys/common/upload"
+            url = image_base + "/sys/common/upload"
             fields = {"biz": "temp", "uploadType": "local"}
             params = None
         else:
@@ -177,12 +206,14 @@ class Attachments:
             url = "https://genai.shanghaitech.edu.cn/htk/chat/upload/chat/file"
             fields = {"biz": "temp"}
             params = {"chatGroupId": group, "aiType": models[model].get('upstream_model', model)}
+        upload_name, upload_mime, upload_data = (await asyncio.to_thread(compress_image, name, mime, data)
+                                                   if kind == "image" else (name, mime, data))
         uploading = time.monotonic()
         try:
             if timing and kind == 'image':
                 timing.count('image_upload_count')
             async with client.stream("POST", url, params=params, headers=headers, data=fields,
-                                     files={"file": (name, data, mime)}, follow_redirects=False) as response:
+                                     files={"file": (upload_name, upload_data, upload_mime)}, follow_redirects=False) as response:
                 if response.status_code in (401, 403):
                     raise GatewayError(503, "upload_authentication_required", "The upload credential must be renewed locally.")
                 if response.status_code == 413:
@@ -211,7 +242,7 @@ class Attachments:
             relative = value.get("url")
             if not isinstance(relative, str) or not relative.startswith('temp/') or '..' in relative.split('/') or any(c in relative for c in ['?', '#', '\\']):
                 raise GatewayError(502, "upload_protocol_error", "The image upload returned an unsupported asset path.")
-            record.value = STATIC_PREFIX + relative
+            record.value = image_base + "/sys/common/static/" + relative
             w, h = value.get("width"), value.get("height")
             if type(w) is not int or type(h) is not int or not 0 < w <= 100000 or not 0 < h <= 100000:
                 raise GatewayError(502, "upload_protocol_error", "The image upload did not return valid dimensions.")
@@ -287,7 +318,7 @@ class Attachments:
             plan[index] = refs
             text = '\n'.join(texts)
             rewritten['messages'].append({**message, 'content': text if text.strip() or not refs else '[User supplied attachments.]'})
-        docs = [r for refs in plan.values() for r in refs if isinstance(r, Attachment) and r.kind == 'document']
+        docs = [r for r in plan.get(len(messages) - 1, []) if isinstance(r, Attachment) and r.kind == 'document']
         if len({r.group for r in docs}) > 1:
             raise bad("Documents must be uploaded with the same conversation_id before being referenced together.")
         return rewritten, plan
@@ -303,7 +334,7 @@ class Attachments:
         return (any(isinstance(r, tuple) or r.kind == 'image' for r in refs)
                 and any(isinstance(r, Attachment) and r.kind == 'document' for r in refs))
 
-    async def materialize(self, client, models, model, plan, payload, token, image_token=None, *, bound_group=None, timing=None):
+    async def materialize(self, client, models, model, plan, payload, token, image_token=None, *, bound_group=None, timing=None, image_base=IMAGE_ORIGIN + "/"):
         documents = []
         last = len(payload['messages'])
         for index, refs in plan.items():
@@ -311,11 +342,14 @@ class Attachments:
             for ref in refs:
                 # Queueing may outlive the file TTL or a user may release it.
                 # Revalidate immediately before referencing it upstream.
-                record = await self.upload(client, models, model, *ref, token, image_token, **({'timing': timing} if timing else {})) if isinstance(ref, tuple) else self.get(ref.id, model)
+                record = await self.upload(client, models, model, *ref, token, image_token, image_base=image_base, **({'timing': timing} if timing else {})) if isinstance(ref, tuple) else self.get(ref.id, model)
                 if record.credential_fingerprint != hashlib.sha256(token.encode()).hexdigest():
                     raise GatewayError(400, 'file_credential_mismatch', 'The upstream credential changed. Re-upload the attachment before using it.')
                 if record.kind == 'document':
-                    documents.append(record)
+                    if index == last:
+                        documents.append(record)
+                    else:
+                        payload['messages'][index]['content'] += '\n【上传文件：' + record.filename + '】'
                 else:
                     images.append(record)
             if images:
