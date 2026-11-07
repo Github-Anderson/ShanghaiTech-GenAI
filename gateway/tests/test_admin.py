@@ -178,6 +178,37 @@ class AdminTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(css.status_code, 200)
         self.assertIn('text/css', css.headers['content-type'])
         self.assertEqual((await self.client.get('/credential-import.js')).status_code, 404)
+        for name in ['core.js', 'admin.js', 'test.js']:
+            script = await self.client.get('/' + name)
+            self.assertEqual(script.status_code, 200)
+            self.assertIn('javascript', script.headers['content-type'])
+            self.assertEqual(script.headers['x-content-type-options'], 'nosniff')
+
+    def test_console_scripts_reference_existing_elements_and_exports(self):
+        import re
+        static = Path(__file__).resolve().parents[1] / 'gateway' / 'static'
+        ids = set(re.findall(r'\bid="([^"]+)"', (static / 'index.html').read_text()))
+        core = (static / 'core.js').read_text()
+        exports = set(re.findall(r'^export (?:async )?(?:function|const|class) ([\w$]+)', core, re.M))
+        for name in ['admin.js', 'test.js']:
+            source = (static / name).read_text()
+            referenced = set(re.findall(r"\$\('([A-Za-z]\w*)'\)", source))
+            self.assertFalse(referenced - ids, name)
+            imported = re.search(r"import \{([^}]+)\} from './core\.js'", source).group(1)
+            self.assertFalse({item.strip() for item in imported.split(',')} - exports, name)
+            self.assertIn('<script type="module" src="/' + name + '"></script>', (static / 'index.html').read_text())
+
+    async def test_request_logs_filter_by_model(self):
+        for model, outcome in [('deepseek-pro', 'complete'), ('deepseek-pro', 'failed'), ('qwen', 'complete')]:
+            self.service.audit.add('request', {'time': time.time(), 'method': 'POST', 'path': '/v1/chat/completions', 'category': 'api',
+                                               'model': model, 'outcome': outcome, 'http_status': 200, 'duration_ms': 1})
+        result = (await self.client.get('/v1/admin/logs?category=api&model=deepseek-pro')).json()
+        self.assertEqual(result['total'], 2)
+        self.assertEqual(result['models'], ['deepseek-pro', 'qwen'])
+        self.assertIn('server_time', result)
+        narrowed = (await self.client.get('/v1/admin/logs?category=api&model=deepseek-pro&outcome=failed')).json()
+        self.assertEqual(narrowed['total'], 1)
+        self.assertEqual((await self.client.get('/v1/admin/logs?model=' + 'x' * 121)).status_code, 422)
 
     def test_request_categories(self):
         from gateway.audit import request_category

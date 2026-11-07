@@ -310,19 +310,18 @@ async def health():
     return {"status": "alive", "product": "ShanghaiTech GenAI", "version": __version__, "protocol_version": PROTOCOL_VERSION, "upstream_validated": False}
 
 
-@app.get('/style.css', include_in_schema=False)
-async def console_styles():
-    return FileResponse(Path(__file__).parent / 'static' / 'style.css', media_type='text/css', headers={'Cache-Control': 'no-store'})
+CONSOLE_ASSETS = {'style.css': 'text/css', 'core.js': 'text/javascript', 'admin.js': 'text/javascript', 'test.js': 'text/javascript'}
 
 
-@app.get('/admin.js', include_in_schema=False)
-async def admin_script():
-    return FileResponse(Path(__file__).parent / 'static' / 'admin.js', media_type='text/javascript', headers={'Cache-Control': 'no-store'})
+def console_asset(name, media_type):
+    async def asset():
+        return FileResponse(Path(__file__).parent / 'static' / name, media_type=media_type,
+                            headers={'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'})
+    return asset
 
 
-@app.get('/test.js', include_in_schema=False)
-async def test_script():
-    return FileResponse(Path(__file__).parent / 'static' / 'test.js', media_type='text/javascript', headers={'Cache-Control': 'no-store'})
+for _name, _media_type in CONSOLE_ASSETS.items():
+    app.add_api_route('/' + _name, console_asset(_name, _media_type), methods=['GET'], include_in_schema=False)
 
 
 @app.get('/v1/admin/status')
@@ -347,11 +346,14 @@ async def admin_probe(request: Request, automatic: bool = False):
 @app.get('/v1/admin/logs')
 async def admin_logs(request: Request, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
                      category: str = Query('', pattern='^(|api|management)$'),
-                     outcome: str = Query('', pattern='^(|complete|failed|cancelled)$')):
+                     outcome: str = Query('', pattern='^(|complete|failed|cancelled)$'),
+                     model: str = Query('', max_length=120)):
     service = await authorize(request)
-    result = service.audit.rows('request', offset, limit, category, outcome)
+    result = service.audit.rows('request', offset, limit, category, outcome, model)
     # Do not include this log-read request in the running list.
-    result['active'] = [dict(row) for row in service.audit.active.values() if row is not getattr(request.state, 'audit', None) and not outcome and (not category or row.get('category') == category)]
+    result['active'] = [dict(row) for row in service.audit.active.values() if row is not getattr(request.state, 'audit', None) and not outcome
+                        and (not category or row.get('category') == category) and (not model or row.get('model') == model)]
+    result['server_time'] = time.time()
     return JSONResponse(result, headers={'Cache-Control': 'no-store'})
 
 

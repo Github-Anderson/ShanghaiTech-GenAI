@@ -57,20 +57,24 @@ class AuditStore:
     def login(self, event, result, code=None):
         self.add('login', {'time': time.time(), 'event': event, 'result': result, 'error_code': code})
 
-    def rows(self, kind, offset=0, limit=50, category='', outcome=''):
+    def rows(self, kind, offset=0, limit=50, category='', outcome='', model=''):
         if not self.available:
-            return {'items': [], 'total': 0, 'available': False}
+            return {'items': [], 'total': 0, 'available': False, 'models': []}
         try:
             self.prune()
             rows = [dict(json.loads(raw), id=ident) for ident, raw in self.db.execute('SELECT id,data FROM events WHERE kind=? ORDER BY id DESC', (kind,))]
             if category:
                 rows = [r for r in rows if r.get('category') == category]
+            # Model choices reflect the category scope, before outcome and model narrowing.
+            models = sorted({r['model'] for r in rows if isinstance(r.get('model'), str)})
             if outcome:
                 rows = [r for r in rows if r.get('outcome') == outcome]
-            return {'items': rows[offset:offset + limit], 'total': len(rows), 'available': True}
+            if model:
+                rows = [r for r in rows if r.get('model') == model]
+            return {'items': rows[offset:offset + limit], 'total': len(rows), 'available': True, 'models': models}
         except sqlite3.Error:
             self.available = False
-            return {'items': [], 'total': 0, 'available': False}
+            return {'items': [], 'total': 0, 'available': False, 'models': []}
 
     def statistics(self, window='24h'):
         """Final outcomes, by completion minute; independent of bounded raw logs."""
@@ -106,6 +110,7 @@ API_PREFIXES = ('/v1/files/', '/v1/conversations/')
 def request_category(path):
     """Model API traffic is 'api'; console, monitoring, credentials and unmatched paths are 'management'."""
     return 'api' if path in API_PATHS or path.startswith(API_PREFIXES) else 'management'
+
 
 def request_summary(data, models):
     """Only known catalog identifiers, booleans and counts enter the journal."""
