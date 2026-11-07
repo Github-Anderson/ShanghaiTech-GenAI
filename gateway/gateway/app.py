@@ -310,12 +310,6 @@ async def health():
     return {"status": "alive", "product": "ShanghaiTech GenAI", "version": __version__, "protocol_version": PROTOCOL_VERSION, "upstream_validated": False}
 
 
-@app.get('/credential-import.js', include_in_schema=False)
-async def credential_import_script():
-    return FileResponse(Path(__file__).parent / 'static' / 'credential-import.js',
-                        media_type='text/javascript', headers={'Cache-Control': 'no-store'})
-
-
 @app.get('/style.css', include_in_schema=False)
 async def console_styles():
     return FileResponse(Path(__file__).parent / 'static' / 'style.css', media_type='text/css', headers={'Cache-Control': 'no-store'})

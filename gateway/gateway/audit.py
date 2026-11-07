@@ -99,6 +99,14 @@ class AuditStore:
             self.db.close()
 
 
+API_PATHS = frozenset(('/v1/models', '/v1/capabilities', '/v1/files', '/v1/chat/completions'))
+API_PREFIXES = ('/v1/files/', '/v1/conversations/')
+
+
+def request_category(path):
+    """Model API traffic is 'api'; console, monitoring, credentials and unmatched paths are 'management'."""
+    return 'api' if path in API_PATHS or path.startswith(API_PREFIXES) else 'management'
+
 def request_summary(data, models):
     """Only known catalog identifiers, booleans and counts enter the journal."""
     model = data.get('model')
@@ -136,7 +144,7 @@ class AuditMiddleware:
         started = time.monotonic()
         row = {'request_id': secrets.token_hex(8), 'time': time.time(), 'method': scope['method'] if scope['method'] in ('GET', 'POST', 'DELETE', 'PUT', 'PATCH', 'HEAD', 'OPTIONS') else 'OTHER', 'outcome': 'running'}
         path = scope.get('path', '')
-        row['category'] = 'management' if path.startswith('/v1/admin/') or path in ('/healthz', '/readyz', '/v1/credentials/import', '/v1/credentials/logout') else 'api'
+        row['category'] = request_category(path)
         if path == '/v1/chat/completions':
             row['path'] = path
         scope.setdefault('state', {})['audit'] = row
@@ -172,7 +180,7 @@ class AuditMiddleware:
         finally:
             route = scope.get('route')
             row['path'] = getattr(route, 'path', '<unmatched>')
-            row['category'] = ('management' if row['path'].startswith('/v1/admin/') or row['path'] in ('/', '/status', '/log', '/test', '/healthz', '/readyz', '/credential-import.js', '/admin.js', '/test.js', '/style.css', '/v1/credentials/import', '/v1/credentials/logout') else 'api')
+            row['category'] = request_category(row['path'])
             if row['outcome'] == 'running':
                 row['outcome'] = 'cancelled' if disconnected and not ended else 'complete' if ended and row.get('http_status', 500) < 400 else 'failed'
             row['duration_ms'] = round((time.monotonic() - started) * 1000, 2)

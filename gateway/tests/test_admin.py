@@ -92,18 +92,19 @@ class AdminTests(unittest.IsolatedAsyncioTestCase):
         response=await self.client.post('/v1/chat/completions',json=data)
         self.assertEqual(response.status_code,400)
         rows=(await self.client.get('/v1/admin/logs?category=api&outcome=failed')).json()['items']
-        self.assertEqual(len(rows),3)
+        self.assertEqual(len(rows),2)
         self.assertEqual(rows[0]['model'],'deepseek-pro')
         self.assertEqual(rows[0]['messages_count'],1)
         self.assertEqual(rows[1]['path'],'/v1/conversations/{conversation_id}')
-        self.assertEqual(rows[2]['path'],'<unmatched>')
+        unmatched=(await self.client.get('/v1/admin/logs?category=management&outcome=failed')).json()['items']
+        self.assertEqual([r['path'] for r in unmatched],['<unmatched>'])
         self.assertNotIn(SECRET,json.dumps(rows))
         self.assertNotIn(KEY,json.dumps(rows))
         self.assertNotIn(SECRET.encode(), (self.root/'admin.sqlite3').read_bytes())
         self.assertEqual((await self.client.get('/v1/admin/logs?limit=101')).status_code,422)
         page=(await self.client.get('/v1/admin/logs?category=api&limit=1&offset=1')).json()
         self.assertEqual(len(page['items']),1)
-        self.assertEqual(page['total'],3)
+        self.assertEqual(page['total'],2)
 
     async def test_stream_final_failure_is_not_http_success(self):
         async def failed(*args,**kwargs):
@@ -176,6 +177,16 @@ class AdminTests(unittest.IsolatedAsyncioTestCase):
         css = await self.client.get('/style.css')
         self.assertEqual(css.status_code, 200)
         self.assertIn('text/css', css.headers['content-type'])
+        self.assertEqual((await self.client.get('/credential-import.js')).status_code, 404)
+
+    def test_request_categories(self):
+        from gateway.audit import request_category
+        for path in ['/v1/models', '/v1/capabilities', '/v1/files', '/v1/files/{file_id}', '/v1/files/abc',
+                     '/v1/chat/completions', '/v1/conversations/{conversation_id}', '/v1/conversations/delete']:
+            self.assertEqual(request_category(path), 'api', path)
+        for path in ['<unmatched>', '/', '/status', '/admin.js', '/favicon.ico', '/healthz', '/readyz', '/v1/admin/status',
+                     '/v1/admin/probe', '/v1/credentials/status', '/v1/credentials/import', '/v1/credentials/logout']:
+            self.assertEqual(request_category(path), 'management', path)
 
 
     async def test_monitoring_does_not_fill_history_or_statistics(self):
