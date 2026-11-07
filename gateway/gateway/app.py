@@ -65,6 +65,7 @@ class Service:
         self.deleting = False
         self.semaphore = asyncio.Semaphore(settings.max_concurrent_requests)
         self.pending = 0
+        self.running = 0
         self.catalog = SiteCatalog(client, self.credentials, settings.models)
 
     async def site_config(self, *, refresh=False):
@@ -84,11 +85,13 @@ class Service:
             try:
                 await asyncio.wait_for(self.semaphore.acquire(), timeout=self.settings.queue_timeout_seconds)
                 acquired = True
+                self.running += 1
             except TimeoutError:
                 raise GatewayError(429, "queue_timeout", "The local account queue timed out.") from None
             yield
         finally:
             if acquired:
+                self.running -= 1
                 self.semaphore.release()
             self.pending -= 1
 
@@ -307,40 +310,34 @@ async def health():
     return {"status": "alive", "product": "ShanghaiTech GenAI", "version": __version__, "protocol_version": PROTOCOL_VERSION, "upstream_validated": False}
 
 
-@app.get('/credential-import.js', include_in_schema=False)
-async def credential_import_script():
-    return FileResponse(Path(__file__).parent / 'static' / 'credential-import.js',
-                        media_type='text/javascript', headers={'Cache-Control': 'no-store'})
+CONSOLE_ASSETS = {'style.css': 'text/css', 'core.js': 'text/javascript', 'admin.js': 'text/javascript', 'test.js': 'text/javascript'}
 
 
-@app.get('/style.css', include_in_schema=False)
-async def console_styles():
-    return FileResponse(Path(__file__).parent / 'static' / 'style.css', media_type='text/css', headers={'Cache-Control': 'no-store'})
+def console_asset(name, media_type):
+    async def asset():
+        return FileResponse(Path(__file__).parent / 'static' / name, media_type=media_type,
+                            headers={'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'})
+    return asset
 
 
-@app.get('/admin.js', include_in_schema=False)
-async def admin_script():
-    return FileResponse(Path(__file__).parent / 'static' / 'admin.js', media_type='text/javascript', headers={'Cache-Control': 'no-store'})
-
-
-@app.get('/test.js', include_in_schema=False)
-async def test_script():
-    return FileResponse(Path(__file__).parent / 'static' / 'test.js', media_type='text/javascript', headers={'Cache-Control': 'no-store'})
+for _name, _media_type in CONSOLE_ASSETS.items():
+    app.add_api_route('/' + _name, console_asset(_name, _media_type), methods=['GET'], include_in_schema=False)
 
 
 @app.get('/v1/admin/status')
-async def admin_status(request: Request):
-    return JSONResponse(snapshot(await authorize(request)), headers={'Cache-Control': 'no-store'})
+async def admin_status(request: Request, window: str = Query('24h', pattern='^(24h|7d)$')):
+    return JSONResponse(snapshot(await authorize(request), window), headers={'Cache-Control': 'no-store'})
 
 
 @app.post('/v1/admin/probe')
-async def admin_probe(request: Request):
+async def admin_probe(request: Request, automatic: bool = False):
     service = await authorize(request)
+    request.state.monitoring = automatic
     origin = request.headers.get('origin')
     if origin and origin != f'{request.url.scheme}://{request.url.netloc}':
         raise GatewayError(403, 'invalid_probe_origin', 'Run the check from the gateway page.')
     try:
-        result = await probe_connections(service)
+        result = await probe_connections(service, automatic=automatic)
     except TimeoutError:
         raise GatewayError(504, 'probe_timeout', 'The connection check timed out.') from None
     return JSONResponse(result, headers={'Cache-Control': 'no-store'})
@@ -349,11 +346,14 @@ async def admin_probe(request: Request):
 @app.get('/v1/admin/logs')
 async def admin_logs(request: Request, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
                      category: str = Query('', pattern='^(|api|management)$'),
-                     outcome: str = Query('', pattern='^(|complete|failed|cancelled)$')):
+                     outcome: str = Query('', pattern='^(|complete|failed|cancelled)$'),
+                     model: str = Query('', max_length=120)):
     service = await authorize(request)
-    result = service.audit.rows('request', offset, limit, category, outcome)
+    result = service.audit.rows('request', offset, limit, category, outcome, model)
     # Do not include this log-read request in the running list.
-    result['active'] = [dict(row) for row in service.audit.active.values() if row is not getattr(request.state, 'audit', None)]
+    result['active'] = [dict(row) for row in service.audit.active.values() if row is not getattr(request.state, 'audit', None) and not outcome
+                        and (not category or row.get('category') == category) and (not model or row.get('model') == model)]
+    result['server_time'] = time.time()
     return JSONResponse(result, headers={'Cache-Control': 'no-store'})
 
 

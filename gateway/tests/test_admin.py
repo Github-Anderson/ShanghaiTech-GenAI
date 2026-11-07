@@ -92,18 +92,19 @@ class AdminTests(unittest.IsolatedAsyncioTestCase):
         response=await self.client.post('/v1/chat/completions',json=data)
         self.assertEqual(response.status_code,400)
         rows=(await self.client.get('/v1/admin/logs?category=api&outcome=failed')).json()['items']
-        self.assertEqual(len(rows),3)
+        self.assertEqual(len(rows),2)
         self.assertEqual(rows[0]['model'],'deepseek-pro')
         self.assertEqual(rows[0]['messages_count'],1)
         self.assertEqual(rows[1]['path'],'/v1/conversations/{conversation_id}')
-        self.assertEqual(rows[2]['path'],'<unmatched>')
+        unmatched=(await self.client.get('/v1/admin/logs?category=management&outcome=failed')).json()['items']
+        self.assertEqual([r['path'] for r in unmatched],['<unmatched>'])
         self.assertNotIn(SECRET,json.dumps(rows))
         self.assertNotIn(KEY,json.dumps(rows))
         self.assertNotIn(SECRET.encode(), (self.root/'admin.sqlite3').read_bytes())
         self.assertEqual((await self.client.get('/v1/admin/logs?limit=101')).status_code,422)
         page=(await self.client.get('/v1/admin/logs?category=api&limit=1&offset=1')).json()
         self.assertEqual(len(page['items']),1)
-        self.assertEqual(page['total'],3)
+        self.assertEqual(page['total'],2)
 
     async def test_stream_final_failure_is_not_http_success(self):
         async def failed(*args,**kwargs):
@@ -117,6 +118,8 @@ class AdminTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row['http_status'],200)
         self.assertEqual(row['outcome'],'failed')
         self.assertEqual(row['error_code'],'upstream_incomplete')
+        self.assertEqual(self.service.audit.statistics()['failed'], 1)
+        self.assertEqual(self.service.audit.statistics()['complete'], 0)
         self.assertEqual(response.headers['x-request-id'],row['request_id'])
 
     async def test_success_stream_and_nonstream(self):
@@ -129,6 +132,10 @@ class AdminTests(unittest.IsolatedAsyncioTestCase):
                 response=await self.client.post('/v1/chat/completions',json={'model':'deepseek-pro','stream':stream,'messages':[{'role':'user','content':SECRET}]})
             self.assertEqual(response.status_code,200)
             self.assertEqual(self.service.audit.rows('request')['items'][0]['outcome'],'complete')
+
+        stats = self.service.audit.statistics()
+        self.assertEqual((stats['complete'], stats['total'], stats['success_rate']), (2, 2, 100))
+        self.assertIsNotNone(stats['average_duration_ms'])
 
     async def test_disconnect_keeps_partial_request_cancelled(self):
         sent=[]
@@ -170,6 +177,120 @@ class AdminTests(unittest.IsolatedAsyncioTestCase):
         css = await self.client.get('/style.css')
         self.assertEqual(css.status_code, 200)
         self.assertIn('text/css', css.headers['content-type'])
+        self.assertEqual((await self.client.get('/credential-import.js')).status_code, 404)
+        for name in ['core.js', 'admin.js', 'test.js']:
+            script = await self.client.get('/' + name)
+            self.assertEqual(script.status_code, 200)
+            self.assertIn('javascript', script.headers['content-type'])
+            self.assertEqual(script.headers['x-content-type-options'], 'nosniff')
+
+    def test_console_scripts_reference_existing_elements_and_exports(self):
+        import re
+        static = Path(__file__).resolve().parents[1] / 'gateway' / 'static'
+        ids = set(re.findall(r'\bid="([^"]+)"', (static / 'index.html').read_text()))
+        core = (static / 'core.js').read_text()
+        exports = set(re.findall(r'^export (?:async )?(?:function|const|class) ([\w$]+)', core, re.M))
+        for name in ['admin.js', 'test.js']:
+            source = (static / name).read_text()
+            referenced = set(re.findall(r"\$\('([A-Za-z]\w*)'\)", source))
+            self.assertFalse(referenced - ids, name)
+            imported = re.search(r"import \{([^}]+)\} from './core\.js'", source).group(1)
+            self.assertFalse({item.strip() for item in imported.split(',')} - exports, name)
+            self.assertIn('<script type="module" src="/' + name + '"></script>', (static / 'index.html').read_text())
+
+    async def test_request_logs_filter_by_model(self):
+        for model, outcome in [('deepseek-pro', 'complete'), ('deepseek-pro', 'failed'), ('qwen', 'complete')]:
+            self.service.audit.add('request', {'time': time.time(), 'method': 'POST', 'path': '/v1/chat/completions', 'category': 'api',
+                                               'model': model, 'outcome': outcome, 'http_status': 200, 'duration_ms': 1})
+        result = (await self.client.get('/v1/admin/logs?category=api&model=deepseek-pro')).json()
+        self.assertEqual(result['total'], 2)
+        self.assertEqual(result['models'], ['deepseek-pro', 'qwen'])
+        self.assertIn('server_time', result)
+        narrowed = (await self.client.get('/v1/admin/logs?category=api&model=deepseek-pro&outcome=failed')).json()
+        self.assertEqual(narrowed['total'], 1)
+        self.assertEqual((await self.client.get('/v1/admin/logs?model=' + 'x' * 121)).status_code, 422)
+
+    def test_request_categories(self):
+        from gateway.audit import request_category
+        for path in ['/v1/models', '/v1/capabilities', '/v1/files', '/v1/files/{file_id}', '/v1/files/abc',
+                     '/v1/chat/completions', '/v1/conversations/{conversation_id}', '/v1/conversations/delete']:
+            self.assertEqual(request_category(path), 'api', path)
+        for path in ['<unmatched>', '/', '/status', '/admin.js', '/favicon.ico', '/healthz', '/readyz', '/v1/admin/status',
+                     '/v1/admin/probe', '/v1/credentials/status', '/v1/credentials/import', '/v1/credentials/logout']:
+            self.assertEqual(request_category(path), 'management', path)
+
+
+    async def test_monitoring_does_not_fill_history_or_statistics(self):
+        for path in ['/v1/admin/status', '/v1/admin/logs', '/v1/admin/login-history', '/healthz']:
+            self.assertEqual((await self.client.get(path)).status_code, 200)
+        self.assertEqual(self.service.audit.rows('request')['total'], 0)
+        self.assertEqual((await self.client.get('/v1/admin/status?window=7d')).json()['statistics']['window'], '7d')
+        self.assertEqual((await self.client.get('/v1/admin/status?window=bad')).status_code, 422)
+        await self.client.post('/v1/chat/completions', headers={'Authorization':'Bearer wrong'}, json={})
+        self.assertEqual(self.service.audit.statistics()['total'], 0)
+        self.assertEqual(self.service.audit.rows('request')['items'][0]['http_status'], 401)
+        await self.client.post('/v1/chat/completions', json={'model':'does-not-exist','messages':[]})
+        self.assertEqual(self.service.audit.statistics()['failed'], 1)
+
+    async def test_automatic_probe_cache_and_transition_logging(self):
+        first = await self.client.post('/v1/admin/probe?automatic=true')
+        second = await self.client.post('/v1/admin/probe?automatic=true')
+        self.assertEqual(first.json(), second.json())
+        self.assertEqual(len(self.upstream_calls), 5)
+        self.assertEqual(self.service.audit.rows('request')['total'], 0)
+        self.assertEqual(self.service.audit.rows('login')['total'], 1)
+        self.service.last_probe['checked_at'] -= 61
+        await self.client.post('/v1/admin/probe?automatic=true')
+        self.assertEqual(len(self.upstream_calls), 10)
+        self.assertEqual(self.service.audit.rows('login')['total'], 1)
+        await self.client.post('/v1/admin/probe')
+        self.assertEqual(len(self.upstream_calls), 15)
+        self.assertEqual(self.service.audit.rows('login')['total'], 2)
+        self.assertEqual(self.service.audit.rows('request')['total'], 1)
+        self.service.last_probe['checked_at'] -= 61
+        async def denied(**kwargs): raise GatewayError(503,'upstream_authentication_required','Renew')
+        with patch.object(self.service, 'site_config', denied):
+            await self.client.post('/v1/admin/probe?automatic=true')
+        self.assertEqual(self.service.audit.rows('login')['total'], 3)
+        self.assertEqual(self.service.audit.rows('login')['items'][0]['result'], 'failed')
+
+    async def test_active_and_waiting_counts_recover_after_cancellation(self):
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        async def running():
+            async with self.service.slot():
+                entered.set()
+                await release.wait()
+        first = asyncio.create_task(running())
+        await entered.wait()
+        second = asyncio.create_task(running())
+        await asyncio.sleep(0)
+        state = snapshot(self.service)['gateway']
+        self.assertEqual((state['active_requests'], state['queued_requests']), (1, 1))
+        second.cancel()
+        with self.assertRaises(asyncio.CancelledError): await second
+        self.assertEqual(snapshot(self.service)['gateway']['queued_requests'], 0)
+        release.set()
+        await first
+        self.assertEqual((self.service.pending, self.service.running), (0, 0))
+
+    async def test_cancelled_model_count_and_active_log_filter(self):
+        from types import SimpleNamespace
+        async def downstream(scope, receive, send):
+            scope['state']['authorized'] = True
+            scope['route'] = SimpleNamespace(path='/v1/chat/completions')
+            await send({'type':'http.response.start','status':200,'headers':[]})
+            await send({'type':'http.response.body','body':b'partial','more_body':True})
+            active = (await self.client.get('/v1/admin/logs?category=api')).json()['active']
+            self.assertEqual(len(active), 1)
+            self.assertEqual((await self.client.get('/v1/admin/logs?category=management')).json()['active'], [])
+            self.assertEqual((await self.client.get('/v1/admin/logs?outcome=failed')).json()['active'], [])
+            await receive()
+        async def receive(): return {'type':'http.disconnect'}
+        async def send(message): pass
+        await AuditMiddleware(downstream)({'type':'http','method':'POST','path':'/v1/chat/completions','app':app}, receive, send)
+        self.assertEqual(self.service.audit.statistics()['cancelled'], 1)
+        self.assertEqual(self.service.audit.statistics()['total'], 1)
 
 
 class AuditPersistenceTests(unittest.TestCase):
@@ -197,3 +318,44 @@ class AuditPersistenceTests(unittest.TestCase):
             self.assertFalse(store.rows('request')['available'])
             store.add('request',{})
             store.close()
+
+
+class MetricPersistenceTests(unittest.TestCase):
+    def test_final_outcomes_survive_raw_log_limit_and_restart(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'audit.db'
+            store = AuditStore(path)
+            store.REQUEST_LIMIT = 2
+            started = store.statistics()['started_at']
+            self.assertIsNone(store.statistics()['success_rate'])
+            self.assertIsNone(store.statistics()['average_duration_ms'])
+            for outcome, duration in [('complete', 100), ('failed', 10000), ('cancelled', 9000), ('complete', 300)]:
+                store.add('request', {'outcome':outcome, 'duration_ms':duration}, model_request=True)
+            store.add('request', {'outcome':'complete', 'duration_ms':1})
+            self.assertEqual(store.rows('request')['total'], 2)
+            store.close()
+            second = AuditStore(path)
+            stats = second.statistics()
+            self.assertEqual((stats['complete'],stats['failed'],stats['cancelled'],stats['total']), (2,1,1,4))
+            self.assertEqual(stats['success_rate'], 50)
+            self.assertEqual(stats['average_duration_ms'], 200)
+            self.assertEqual(stats['started_at'], started)
+            self.assertFalse(stats['complete_window'])
+            second.close()
+
+    def test_windows_and_expiration_use_completion_time(self):
+        now = 2000000040
+        with patch('gateway.audit.time.time', return_value=now-9*86400):
+            store = AuditStore(None)
+        for offset in [8*86400, 2*86400, 60]:
+            with patch('gateway.audit.time.time', return_value=now-offset):
+                store.add('request', {'outcome':'complete','duration_ms':200}, model_request=True)
+        with patch('gateway.audit.time.time', return_value=now):
+            self.assertEqual(store.statistics('24h')['total'], 1)
+            self.assertEqual(store.statistics('7d')['total'], 2)
+            self.assertTrue(store.statistics('7d')['complete_window'])
+            store.prune()
+            self.assertEqual(store.db.execute('SELECT SUM(complete) FROM model_metrics').fetchone()[0], 2)
+        store.available = False
+        self.assertEqual(store.statistics(), {'available':False, 'window':'24h'})
+        store.close()
