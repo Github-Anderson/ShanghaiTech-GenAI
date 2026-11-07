@@ -65,6 +65,7 @@ class Service:
         self.deleting = False
         self.semaphore = asyncio.Semaphore(settings.max_concurrent_requests)
         self.pending = 0
+        self.running = 0
         self.catalog = SiteCatalog(client, self.credentials, settings.models)
 
     async def site_config(self, *, refresh=False):
@@ -84,11 +85,13 @@ class Service:
             try:
                 await asyncio.wait_for(self.semaphore.acquire(), timeout=self.settings.queue_timeout_seconds)
                 acquired = True
+                self.running += 1
             except TimeoutError:
                 raise GatewayError(429, "queue_timeout", "The local account queue timed out.") from None
             yield
         finally:
             if acquired:
+                self.running -= 1
                 self.semaphore.release()
             self.pending -= 1
 
@@ -329,18 +332,19 @@ async def test_script():
 
 
 @app.get('/v1/admin/status')
-async def admin_status(request: Request):
-    return JSONResponse(snapshot(await authorize(request)), headers={'Cache-Control': 'no-store'})
+async def admin_status(request: Request, window: str = Query('24h', pattern='^(24h|7d)$')):
+    return JSONResponse(snapshot(await authorize(request), window), headers={'Cache-Control': 'no-store'})
 
 
 @app.post('/v1/admin/probe')
-async def admin_probe(request: Request):
+async def admin_probe(request: Request, automatic: bool = False):
     service = await authorize(request)
+    request.state.monitoring = automatic
     origin = request.headers.get('origin')
     if origin and origin != f'{request.url.scheme}://{request.url.netloc}':
         raise GatewayError(403, 'invalid_probe_origin', 'Run the check from the gateway page.')
     try:
-        result = await probe_connections(service)
+        result = await probe_connections(service, automatic=automatic)
     except TimeoutError:
         raise GatewayError(504, 'probe_timeout', 'The connection check timed out.') from None
     return JSONResponse(result, headers={'Cache-Control': 'no-store'})
@@ -353,7 +357,7 @@ async def admin_logs(request: Request, offset: int = Query(0, ge=0), limit: int 
     service = await authorize(request)
     result = service.audit.rows('request', offset, limit, category, outcome)
     # Do not include this log-read request in the running list.
-    result['active'] = [dict(row) for row in service.audit.active.values() if row is not getattr(request.state, 'audit', None)]
+    result['active'] = [dict(row) for row in service.audit.active.values() if row is not getattr(request.state, 'audit', None) and not outcome and (not category or row.get('category') == category)]
     return JSONResponse(result, headers={'Cache-Control': 'no-store'})
 
 

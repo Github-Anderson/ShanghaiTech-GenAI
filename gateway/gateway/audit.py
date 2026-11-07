@@ -9,6 +9,7 @@ import time
 class AuditStore:
     REQUEST_LIMIT = 2000
     LOGIN_LIMIT = 500
+    QUIET_PATHS = frozenset(('/v1/admin/status', '/v1/admin/logs', '/v1/admin/login-history', '/healthz', '/readyz'))
 
     def __init__(self, path):
         self.path = path
@@ -24,6 +25,9 @@ class AuditStore:
             self.db.execute('PRAGMA journal_mode=DELETE')
             self.db.execute('CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, time REAL NOT NULL, data TEXT NOT NULL)')
             self.db.execute('CREATE INDEX IF NOT EXISTS events_kind_time ON events(kind, time)')
+            self.db.execute('CREATE TABLE IF NOT EXISTS metric_meta (name TEXT PRIMARY KEY, value REAL NOT NULL)')
+            self.db.execute('INSERT OR IGNORE INTO metric_meta VALUES (?,?)', ('started_at', time.time()))
+            self.db.execute('CREATE TABLE IF NOT EXISTS model_metrics (minute INTEGER PRIMARY KEY, complete INTEGER NOT NULL, failed INTEGER NOT NULL, cancelled INTEGER NOT NULL, duration_ms REAL NOT NULL)')
             self.prune()
             self.available = True
         except (OSError, sqlite3.Error):
@@ -33,13 +37,19 @@ class AuditStore:
         for kind, days, limit in [('request', 7, self.REQUEST_LIMIT), ('login', 365, self.LOGIN_LIMIT)]:
             self.db.execute('DELETE FROM events WHERE kind=? AND time<?', (kind, time.time() - days * 86400))
             self.db.execute('DELETE FROM events WHERE kind=? AND id NOT IN (SELECT id FROM events WHERE kind=? ORDER BY id DESC LIMIT ?)', (kind, kind, limit))
+        self.db.execute('DELETE FROM model_metrics WHERE minute<?', (int((time.time() - 7 * 86400) // 60) * 60,))
         self.db.commit()
 
-    def add(self, kind, data):
+    def add(self, kind, data, *, model_request=False):
         if not self.available:
             return
         try:
-            self.db.execute('INSERT INTO events(kind,time,data) VALUES(?,?,?)', (kind, time.time(), json.dumps(data, ensure_ascii=True)))
+            now = time.time()
+            self.db.execute('INSERT INTO events(kind,time,data) VALUES(?,?,?)', (kind, now, json.dumps(data, ensure_ascii=True)))
+            if model_request and data.get('outcome') in ('complete', 'failed', 'cancelled'):
+                outcome = data['outcome']
+                self.db.execute('INSERT INTO model_metrics VALUES (?,?,?,?,?) ON CONFLICT(minute) DO UPDATE SET complete=complete+excluded.complete, failed=failed+excluded.failed, cancelled=cancelled+excluded.cancelled, duration_ms=duration_ms+excluded.duration_ms',
+                    (int(now // 60) * 60, int(outcome == 'complete'), int(outcome == 'failed'), int(outcome == 'cancelled'), data.get('duration_ms', 0) if outcome == 'complete' else 0))
             self.prune()
         except sqlite3.Error:
             self.available = False
@@ -61,6 +71,28 @@ class AuditStore:
         except sqlite3.Error:
             self.available = False
             return {'items': [], 'total': 0, 'available': False}
+
+    def statistics(self, window='24h'):
+        """Final outcomes, by completion minute; independent of bounded raw logs."""
+        if window not in ('24h', '7d'):
+            raise ValueError('Unsupported statistics window')
+        empty = {'available': False, 'window': window}
+        if not self.available:
+            return empty
+        try:
+            now = time.time()
+            start = int((now - (86400 if window == '24h' else 7 * 86400)) // 60) * 60
+            since = self.db.execute("SELECT value FROM metric_meta WHERE name='started_at'").fetchone()[0]
+            complete, failed, cancelled, duration = self.db.execute('SELECT COALESCE(SUM(complete),0),COALESCE(SUM(failed),0),COALESCE(SUM(cancelled),0),COALESCE(SUM(duration_ms),0) FROM model_metrics WHERE minute>=? AND minute<=?', (start, int(now // 60) * 60)).fetchone()
+            total = complete + failed + cancelled
+            return {'available': True, 'window': window, 'window_start': start, 'as_of': now,
+                    'started_at': since, 'complete_window': since <= start,
+                    'complete': complete, 'failed': failed, 'cancelled': cancelled, 'total': total,
+                    'success_rate': round(complete / total * 100, 2) if total else None,
+                    'average_duration_ms': round(duration / complete, 2) if complete else None}
+        except sqlite3.Error:
+            self.available = False
+            return empty
 
     def close(self):
         if self.db:
@@ -103,6 +135,10 @@ class AuditMiddleware:
         audit = service.audit
         started = time.monotonic()
         row = {'request_id': secrets.token_hex(8), 'time': time.time(), 'method': scope['method'] if scope['method'] in ('GET', 'POST', 'DELETE', 'PUT', 'PATCH', 'HEAD', 'OPTIONS') else 'OTHER', 'outcome': 'running'}
+        path = scope.get('path', '')
+        row['category'] = 'management' if path.startswith('/v1/admin/') or path in ('/healthz', '/readyz', '/v1/credentials/import', '/v1/credentials/logout') else 'api'
+        if path == '/v1/chat/completions':
+            row['path'] = path
         scope.setdefault('state', {})['audit'] = row
         audit.active[row['request_id']] = row
         ended = False
@@ -136,9 +172,12 @@ class AuditMiddleware:
         finally:
             route = scope.get('route')
             row['path'] = getattr(route, 'path', '<unmatched>')
-            row['category'] = ('management' if row['path'].startswith('/v1/admin/') or row['path'] in ('/', '/status', '/log', '/test', '/healthz', '/readyz', '/credential-import.js', '/admin.js', '/test.js', '/style.css') else 'api')
+            row['category'] = ('management' if row['path'].startswith('/v1/admin/') or row['path'] in ('/', '/status', '/log', '/test', '/healthz', '/readyz', '/credential-import.js', '/admin.js', '/test.js', '/style.css', '/v1/credentials/import', '/v1/credentials/logout') else 'api')
             if row['outcome'] == 'running':
                 row['outcome'] = 'cancelled' if disconnected and not ended else 'complete' if ended and row.get('http_status', 500) < 400 else 'failed'
             row['duration_ms'] = round((time.monotonic() - started) * 1000, 2)
             audit.active.pop(row['request_id'], None)
-            audit.add('request', row)
+            # Successful monitoring reads do not displace useful request history.
+            quiet = (row['method'] == 'GET' and row['path'] in audit.QUIET_PATHS) or (row['path'] == '/v1/admin/probe' and scope['state'].get('monitoring'))
+            if not (quiet and row['outcome'] == 'complete'):
+                audit.add('request', row, model_request=bool(scope['state'].get('authorized')) and row['method'] == 'POST' and row['path'] == '/v1/chat/completions')

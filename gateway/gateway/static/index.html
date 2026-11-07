@@ -1,48 +1,54 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="referrer" content="no-referrer">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark"><meta name="referrer" content="no-referrer">
   <title>ShanghaiTech GenAI</title>
-  <link rel="stylesheet" href="/style.css">
-  <script src="/admin.js" defer></script>
-  <script src="/test.js" defer></script>
+  <script>try{const t=localStorage.getItem('genai-console-theme')||'system';document.documentElement.dataset.theme=t==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):t}catch{}</script>
+  <link rel="stylesheet" href="/style.css"><script src="/admin.js" defer></script><script src="/test.js" defer></script>
 </head>
 <body>
   <div class="app-shell">
-    <header class="app-header">
-      <div class="header-top">
-        <div class="brand"><span class="brand-mark" aria-hidden="true">G</span><div><h1>ShanghaiTech GenAI</h1><p>网关控制台</p></div></div>
-        <nav aria-label="主导航"><a href="/status">状态</a><a href="/log">请求</a><a href="/test">测试</a></nav>
+    <header class="island">
+      <div class="island-top">
+        <a class="brand" href="/status" aria-label="ShanghaiTech GenAI 首页"><span class="brand-mark">G<span></span></span><span class="brand-name">ShanghaiTech GenAI<small>网关控制台 </small></span></a>
+        <nav aria-label="主导航"><a href="/status" data-page="status"><i data-icon="activity"></i>状态</a><a href="/log" data-page="requests"><i data-icon="list"></i>请求</a><a href="/test" data-page="test"><i data-icon="chat"></i>测试</a></nav>
+        <div class="theme-control" role="group" aria-label="外观主题"><button class="icon-button" data-theme-choice="system" title="跟随系统" aria-label="跟随系统"><i data-icon="monitor"></i></button><button class="icon-button" data-theme-choice="light" title="亮色" aria-label="亮色"><i data-icon="sun"></i></button><button class="icon-button" data-theme-choice="dark" title="暗色" aria-label="暗色"><i data-icon="moon"></i></button></div>
       </div>
-      <div class="connection-bar">
-        <label for="apiKey">网关密钥</label>
-        <input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="输入密钥以连接网关">
-        <button id="connect" type="button">验证连接</button>
-        <p id="connectionStatus" role="status">密钥仅保留在当前页面内存中。</p>
+      <div class="island-bottom">
+        <div class="connection-group">
+          <div class="key-control"><label for="apiKey"><i data-icon="key"></i><span>网关密钥</span></label><div class="key-input"><input id="apiKey" aria-label="网关密钥" type="password" autocomplete="off" spellcheck="false" aria-describedby="connectionStatus" placeholder="输入网关密钥"><button class="icon-button" id="toggleKey" type="button" aria-label="显示密钥" title="显示密钥" aria-pressed="false"><i data-icon="eye"></i></button></div><button class="icon-button verify-button" id="connect" aria-label="验证连接" title="验证连接"><i data-icon="check"></i></button></div>
+          <div class="connection-chip" id="connectionChip"><span class="dot"></span><span>未连接</span></div>
+        </div>
+        <div class="credential-control"><span class="credential-chip" id="credentialChip"><span class="dot"></span><span>凭证未验证</span></span><button id="importCredentials"><i data-icon="upload"></i>导入凭证 JSON</button><button id="logoutCredentials" class="text-danger">取消登录</button><input id="credentialsFile" type="file" accept=".json,application/json" hidden></div>
+        <p id="credentialsStatus" class="import-message" role="status" hidden></p>
       </div>
     </header>
+
     <main>
-      <section id="statusPage" aria-labelledby="statusHeading">
-        <div class="page-heading"><div><h2 id="statusHeading">网关状态</h2><p class="subtitle">查看连接、凭证和最近的登录活动。</p></div><div class="toolbar"><button id="refreshStatus" type="button">刷新状态</button><button id="probe" class="primary" type="button">检查连接</button></div></div>
-        <div class="status-meta"><p id="probeMessage" role="status"></p><p id="probeTime">输入密钥后查看状态</p></div>
-        <div id="statusSummary"><div class="status-placeholder">连接网关，查看服务状态</div></div>
-        <div class="status-bottom">
-          <section class="panel" aria-labelledby="credentialsHeading"><div class="panel-heading"><h3 id="credentialsHeading">网站登录</h3><span class="tag">凭证管理</span></div>
-            <p class="muted">导入学校网页导出的登录凭证，即可连接学校服务。</p>
-            <div class="toolbar"><button id="importCredentials" type="button">导入凭证 JSON</button><button id="logoutCredentials" class="danger" type="button">取消登录</button><input id="credentialsFile" type="file" accept=".json,application/json" hidden></div>
-            <p id="credentialsStatus" class="hint" role="status">取消登录只清除本网关保存的凭证。</p>
-          </section>
-          <section class="panel" aria-labelledby="loginHeading"><div class="panel-heading"><h3 id="loginHeading">登录历史</h3><button id="refreshLogin" class="small" type="button">刷新</button></div>
-            <p class="hint">最近 365 天，最多 500 条记录。</p>
-            <div class="table-wrap"><table><caption class="sr-only">登录事件</caption><thead><tr><th scope="col">时间</th><th scope="col">事件</th><th scope="col">结果</th></tr></thead><tbody id="loginRows"></tbody></table></div>
-            <div class="pagination"><span id="loginCount"></span><div class="toolbar"><button id="loginPrevious" class="small" type="button">上一页</button><button id="loginNext" class="small" type="button">下一页</button></div></div>
-          </section>
+      <section id="statusPage">
+        <div class="page-heading"><div><div class="eyebrow">OVERVIEW</div><h1>网关状态</h1><p class="subtitle"><span class="live-dot"></span><span id="updateStatus">输入密钥后连接</span><span class="separator">/</span><span id="lastUpdated">尚未更新</span></p></div><div class="heading-actions"><button class="icon-button" id="pause" aria-label="暂停自动刷新" title="暂停自动刷新"><i data-icon="pause"></i></button><button class="icon-button" id="refreshStatus" aria-label="立即刷新" title="立即刷新"><i data-icon="refresh"></i></button></div></div>
+        <div class="alert" id="connectionStatus" role="status" hidden></div>
+        <div class="section-line"><span class="section-label">请求概览</span><div class="segmented" aria-label="统计时间范围"><button data-range="24h" aria-pressed="true">近 24 小时</button><button data-range="7d" aria-pressed="false">近 7 天</button></div></div>
+        <div class="metrics">
+          <article class="metric"><div class="metric-label">成功 / 已结束请求<i data-icon="check-circle"></i></div><div class="metric-value"><strong id="successCount">—</strong><span>/ <span id="totalCount">—</span></span></div><div class="metric-foot"><span class="badge neutral" id="successRate">—</span><span>请求成功率</span></div></article>
+          <article class="metric"><div class="metric-label">平均响应耗时<i data-icon="clock"></i></div><div class="metric-value"><strong id="latency">—</strong><span>秒</span></div><div class="metric-foot"><span>成功请求 · 含排队</span></div></article>
+          <article class="metric"><div class="metric-label">执行中<i data-icon="layers"></i></div><div class="metric-value"><strong id="activeCount">—</strong><span>/ <span id="concurrencyLimit">—</span></span></div><div class="metric-foot"><span class="queue-dot"></span><span>排队等待 <b id="queueCount">—</b> 个请求</span></div></article>
+          <article class="metric"><div class="metric-label">连续运行<i data-icon="server"></i></div><div class="metric-value uptime"><strong id="uptimeMajor">—</strong><span id="uptimeMajorUnit">小时</span><strong id="uptimeMinor">—</strong><span id="uptimeMinorUnit">分钟</span></div><div class="metric-foot"><span class="dot"></span><span id="runtimeStatus">等待连接</span></div></article>
         </div>
+
+        <p id="statsCoverage" class="statistics-note">仅统计已认证的模型请求；进行中和排队请求单独显示。</p>
+        <div class="connection-grid">
+          <article class="connection-card"><div class="connection-icon"><i data-icon="server"></i></div><div><h2>网关连接 <span class="badge neutral" id="gatewayBadge">未连接</span></h2><p id="gatewayDetail">请先验证网关密钥</p></div><span class="status-ring" id="gatewayRing"><i data-icon="check"></i></span></article>
+          <article class="connection-card"><div class="connection-icon"><i data-icon="globe"></i></div><div><h2>学校服务 <span class="badge neutral" id="schoolBadge">待检查</span></h2><p id="schoolDetail">尚未检查学校服务</p></div><span class="status-ring" id="schoolRing"><i data-icon="check"></i></span></article>
+          <article class="connection-card"><div class="connection-icon"><i data-icon="shield"></i></div><div><h2>网站凭证 <span class="badge neutral" id="authBadge">待验证</span></h2><p id="authDetail">尚未检查网站凭证</p></div><button class="icon-button" id="probe" title="重新检查凭证" aria-label="重新检查凭证"><i data-icon="refresh"></i></button></article>
+        </div>
+
+
       </section>
+
       <section id="logPage" aria-labelledby="logHeading" hidden>
-        <div class="page-heading"><div><h2 id="logHeading">请求日志</h2><p class="subtitle">查看网关收到的请求及其最终结果。</p></div><button id="refreshLogs" type="button">刷新请求</button></div>
+        <div class="page-heading"><div><h1 id="logHeading">请求日志</h1><p class="subtitle">查看网关收到的请求及其最终结果。</p></div><button id="refreshLogs" type="button">刷新请求</button></div>
         <section class="panel log-panel" aria-label="请求记录">
           <div class="filters"><label class="field">请求类别<select id="logCategory"><option value="api">业务请求</option><option value="management">管理与健康检查</option><option value="">全部</option></select></label><label class="field">请求结果<select id="logOutcome"><option value="">全部</option><option value="complete">完成</option><option value="failed">失败</option><option value="cancelled">断开 / 取消</option></select></label><p class="hint">保留 7 天 / 2000 条<br>不保存密钥、聊天全文或附件正文。</p></div>
           <p id="logMessage" class="hint" role="status"></p><div id="activeRequests"></div>
@@ -51,7 +57,7 @@
         </section>
       </section>
       <section id="testPage" aria-labelledby="testHeading" hidden>
-        <div class="page-heading"><div><h2 id="testHeading">模型测试</h2><p class="subtitle">按网关实际能力配置参数，查看完整响应。</p></div><div class="toolbar"><button id="newChat" type="button">新会话</button><button id="deleteChat" class="danger" type="button">删除当前会话</button></div></div>
+        <div class="page-heading"><div><h1 id="testHeading">模型测试</h1><p class="subtitle">按网关实际能力配置参数，查看完整响应。</p></div><div class="toolbar"><button id="newChat" type="button">新会话</button><button id="deleteChat" class="danger" type="button">删除当前会话</button></div></div>
         <div class="test-layout">
           <div class="test-sidebar">
             <section class="panel" aria-labelledby="modelSettingsHeading"><div class="panel-heading"><h3 id="modelSettingsHeading">模型与参数</h3></div>
@@ -75,7 +81,8 @@
         </div>
       </section>
     </main>
-    <footer class="app-footer">ShanghaiTech GenAI<span>本地网关控制台</span></footer>
+    <footer><span>ShanghaiTech GenAI</span><span>网关控制台</span></footer>
   </div>
+
 </body>
 </html>
