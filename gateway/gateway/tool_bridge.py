@@ -331,7 +331,10 @@ class ToolBridge:
         self.parallel = data.get('parallel_tool_calls', True)
         if type(self.parallel) is not bool:
             raise invalid('parallel_tool_calls must be boolean.')
-        for tool in data.get('tools') or []:
+        tools = data.get('tools')
+        if tools is not None and not isinstance(tools, list):
+            raise invalid('Only function tools are supported.')
+        for tool in tools or []:
             if not isinstance(tool, dict) or tool.get('type') != 'function' or not isinstance(tool.get('function'), dict):
                 raise invalid('Only function tools are supported.')
             spec = tool['function']
@@ -349,7 +352,9 @@ class ToolBridge:
         if len(self.tools) > 128:
             raise invalid('At most 128 tools are supported.')
         if isinstance(self.choice, dict):
-            if self.choice.get('type') != 'function' or not isinstance(self.choice.get('function'), dict) or self.choice['function'].get('name') not in self.tools:
+            function = self.choice.get('function')
+            if (self.choice.get('type') != 'function' or not isinstance(function, dict)
+                    or not isinstance(function.get('name'), str) or function['name'] not in self.tools):
                 raise invalid('The selected function must be in tools.')
         elif self.choice not in ['auto', 'none', 'required']:
             raise invalid('Unsupported tool_choice.')
@@ -404,7 +409,10 @@ class ToolBridge:
         result = {key: value for key, value in data.items() if key not in ['tools', 'tool_choice', 'parallel_tool_calls']}
         system, messages = [], []
         turn_protocol = None
-        for message in data.get('messages', []):
+        original_messages = data.get('messages', [])
+        if not isinstance(original_messages, list):
+            raise invalid('Messages must be an array.')
+        for message in original_messages:
             if not isinstance(message, dict):
                 raise invalid('Messages must be objects.')
             role, content = message.get('role'), message.get('content')
@@ -412,10 +420,16 @@ class ToolBridge:
                 system.append(self.text(content))
             elif role == 'assistant':
                 calls = message.get('tool_calls')
+                if calls is not None and not isinstance(calls, list):
+                    raise invalid('Invalid historical tool arguments.')
                 if calls:
                     replay = []
                     for call in calls:
+                        if not isinstance(call, dict):
+                            raise invalid('Invalid historical tool arguments.')
                         function = call.get('function', {})
+                        if not isinstance(function, dict):
+                            raise invalid('Invalid historical tool arguments.')
                         args = function.get('arguments', '{}')
                         try:
                             args = json.loads(args) if isinstance(args, str) else args

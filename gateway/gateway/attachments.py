@@ -185,14 +185,14 @@ class Attachments:
             if timing:
                 timing.count('image_cache_hits')
             return self.get(self.image_cache[digest], model)
-        if len(self.records) >= MAX_FILES:
-            raise GatewayError(429, "attachment_capacity", "Too many active attachments. Release unused references or wait for expiry.")
         group = (chat_group_id or _new_conversation_id()) if kind == "document" else ""
         if kind == 'document' and chat_group_id:
             for existing in self.records.values():
                 if existing.kind == 'document' and existing.group == group:
                     if existing.sha256 == digest[2] and existing.mime_type == mime and existing.credential_fingerprint == fingerprint and existing.model == model:
                         return existing
+        if len(self.records) >= MAX_FILES:
+            raise GatewayError(429, "attachment_capacity", "Too many active attachments. Release unused references or wait for expiry.")
         headers = {"Origin": "https://genai.shanghaitech.edu.cn", "Referer": "https://genai.shanghaitech.edu.cn/dashboard/analysis"}
         if kind == "image":
             if not image_token:
