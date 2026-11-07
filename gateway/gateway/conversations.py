@@ -8,18 +8,11 @@ import time
 import weakref
 from contextlib import asynccontextmanager
 
-from .protocol import GatewayError, _new_conversation_id
+from .protocol import GatewayError, new_conversation_id, validate_conversation_id
 
 TTL_SECONDS = 3600
 MAX_CONVERSATIONS = 256
 MAX_SAVED_GROUPS = 4096
-
-
-def validate_conversation_id(value):
-    if value is not None and (not isinstance(value, str) or not 1 <= len(value) <= 128
-                              or any(ord(c) < 33 or ord(c) > 126 for c in value)):
-        raise GatewayError(400, 'invalid_conversation_id', 'conversation_id must contain 1 to 128 visible ASCII characters.')
-    return value
 
 
 class Conversations:
@@ -96,7 +89,7 @@ class Conversations:
         if key not in self.groups:
             if len(self.groups) >= MAX_CONVERSATIONS or len(self.history) >= MAX_SAVED_GROUPS:
                 raise GatewayError(429, 'conversation_capacity', 'Conversation mapping capacity reached. Delete unused conversations first.')
-            group = _new_conversation_id()
+            group = new_conversation_id()
             self.groups[key] = (group, now)
             self.history[group] = key
             self.deleted.discard((owner, local_id))

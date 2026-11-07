@@ -1,6 +1,7 @@
 """Authenticated management status and explicit, non-generating connection probes."""
 import asyncio
 import hashlib
+import json
 import time
 
 import httpx
@@ -10,11 +11,9 @@ from .protocol import GatewayError
 from .capabilities import PROTOCOL_VERSION
 
 
-def identity(service):
-    data = service.credential_store.read()
+def identity(data):
     if data is None:
         return None
-    import json
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
 
@@ -23,7 +22,7 @@ def snapshot(service, window='24h'):
     current = None
     try:
         data = service.credential_store.read()
-        current = identity(service)
+        current = identity(data)
         if data:
             credentials.update(saved=True, state='saved', image_upload_verified_at_export=data['image']['upload_verified'])
     except GatewayError as error:
@@ -41,13 +40,13 @@ def snapshot(service, window='24h'):
 
 
 async def probe_connections(service, *, automatic=False):
-    current = identity(service)
+    current = identity(service.credential_store.read())
     if automatic and service.last_probe and current == service.probe_identity and time.time() - service.last_probe['checked_at'] < 60:
         return service.last_probe
     if service.probe_lock.locked():
         raise GatewayError(409, 'probe_in_progress', 'A connection check is already running.')
     async with service.probe_lock:
-        before = identity(service)
+        before = identity(service.credential_store.read())
         async def public_page(url):
             start = time.monotonic()
             try:
@@ -72,7 +71,7 @@ async def probe_connections(service, *, automatic=False):
         async with asyncio.timeout(35):
             main, image, auth = await asyncio.gather(public_page('https://genai.shanghaitech.edu.cn/'),
                 public_page('https://genaipic.shanghaitech.edu.cn/'), authenticated())
-        if before != identity(service):
+        if before != identity(service.credential_store.read()):
             raise GatewayError(409, 'credentials_changed', 'Credentials changed during the check; run it again.')
         result = {'checked_at': time.time(), 'main_page': main, 'image_service': image, 'website_authentication': auth,
                   'image_credential': 'unverified', 'model_generation': 'unverified'}

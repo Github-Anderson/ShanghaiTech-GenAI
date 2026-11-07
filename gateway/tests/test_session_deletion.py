@@ -10,7 +10,8 @@ from unittest.mock import patch
 
 import httpx
 
-from gateway.app import app, Service, delete_conversations
+from gateway.app import app
+from gateway.service import Service, delete_conversations
 from gateway.conversations import Conversations, TTL_SECONDS
 from gateway.protocol import GatewayError
 from gateway.settings import Settings
@@ -24,6 +25,7 @@ class SessionDeletionTests(unittest.IsolatedAsyncioTestCase):
                           imported_credentials_file=Path(directory)/'credentials.json')
         settings.gateway_key_file.write_text('synthetic-local-key-'+'x'*32)
         service=Service(settings,client)
+        self.addCleanup(service.audit.close)
         service.credentials=SimpleNamespace(get_token=lambda:TOKEN,get_tenant=lambda token:'0')
         return service
 

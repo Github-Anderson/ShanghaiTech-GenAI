@@ -10,7 +10,8 @@ from unittest.mock import patch
 
 import httpx
 
-from gateway.app import Service, app
+from gateway.app import app
+from gateway.service import Service
 from gateway.protocol import GatewayError
 from gateway.settings import Settings
 from gateway.tool_bridge import ToolBridge
@@ -248,6 +249,7 @@ class RecoveryServiceTests(unittest.IsolatedAsyncioTestCase):
         if directory:
             settings.gateway_key_file.write_text('synthetic-key-' + 'x' * 32)
         result = Service(settings, None)
+        self.addCleanup(result.audit.close)
         result.credentials = SimpleNamespace(get_token=lambda: 'synthetic-token')
         return result
 
@@ -261,7 +263,7 @@ class RecoveryServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(service.conversations.locks[payload['chatGroupId']].locked())
             async for e in stream(BROKEN if len(payloads) == 1 else VALID):
                 yield e
-        with patch('gateway.app.stream_upstream', upstream):
+        with patch('gateway.service.stream_upstream', upstream):
             events = [e async for e in service.events(original, 'xinference', public_model='deepseek-pro',
                                                       conversation_id='offline-test', bridge=bridge())]
         self.assertEqual(len(payloads), 2)
@@ -281,7 +283,7 @@ class RecoveryServiceTests(unittest.IsolatedAsyncioTestCase):
                     yield e
             finally:
                 closed.append(True)
-        with patch('gateway.app.stream_upstream', upstream), self.assertRaises(GatewayError) as caught:
+        with patch('gateway.service.stream_upstream', upstream), self.assertRaises(GatewayError) as caught:
             async for _ in service.events({'chatInfo': 'Question', 'chatGroupId': 'group', 'aiType': 'deepseek-pro'},
                                            'xinference', bridge=bridge()):
                 pass
@@ -307,7 +309,7 @@ class RecoveryServiceTests(unittest.IsolatedAsyncioTestCase):
             async for _ in service.events({'chatInfo': 'Question', 'chatGroupId': 'group', 'aiType': 'deepseek-pro'},
                                            'xinference', bridge=bridge()):
                 pass
-        with patch('gateway.app.stream_upstream', upstream):
+        with patch('gateway.service.stream_upstream', upstream):
             task = asyncio.create_task(consume())
             await asyncio.wait_for(retry_started.wait(), 1)
             task.cancel()
@@ -325,9 +327,9 @@ class RecoveryServiceTests(unittest.IsolatedAsyncioTestCase):
                 if e.get('finish_reason'):
                     yield {'sources_status': 'ready', 'sources': {'links': [], 'count': 2 if valid else 99}}
                 yield e
-        with patch('gateway.app.stream_upstream', upstream):
+        with patch('gateway.service.stream_upstream', upstream):
             events = [e async for e in service.generate({'chatInfo': 'Question', 'aiType': 'deepseek-pro', 'netGo': True},
-                        'xinference', 'synthetic-token', None, bridge=bridge())]
+                        'xinference', 'synthetic-token', bridge=bridge())]
         self.assertEqual(len(calls), 2)
         sources = [e['sources'] for e in events if 'sources' in e]
         self.assertEqual(sources, [{'links': [], 'count': 2}])
@@ -343,7 +345,7 @@ class RecoveryServiceTests(unittest.IsolatedAsyncioTestCase):
                             yield e
                     request = {'model': 'deepseek-pro', 'tools': TOOLS, 'stream': streaming,
                                'messages': [{'role': 'user', 'content': 'Print a marker'}]}
-                    with patch.object(app.state, 'service', service, create=True), patch.object(app.state, 'init_error', None, create=True), patch('gateway.app.stream_upstream', upstream):
+                    with patch.object(app.state, 'service', service, create=True), patch.object(app.state, 'init_error', None, create=True), patch('gateway.service.stream_upstream', upstream):
                         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
                             response = await client.post('/v1/chat/completions', json=request,
                                 headers={'Authorization': 'Bearer ' + service.settings.gateway_key_file.read_text()})

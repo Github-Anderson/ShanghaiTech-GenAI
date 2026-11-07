@@ -39,9 +39,17 @@ def _invalid(code: str, message: str) -> GatewayError:
     return GatewayError(400, code, message)
 
 
-def _new_conversation_id() -> str:
+def new_conversation_id() -> str:
     # The browser indexes 21 random bytes in reverse using byte & 63.
     return "".join(_ID_ALPHABET[value & 63] for value in reversed(secrets.token_bytes(21)))
+
+
+def validate_conversation_id(value):
+    if value is not None and (not isinstance(value, str) or not 1 <= len(value) <= 128
+                              or any(ord(c) < 33 or ord(c) > 126 for c in value)):
+        raise GatewayError(400, 'invalid_conversation_id', 'conversation_id must contain 1 to 128 visible ASCII characters.')
+    return value
+
 
 
 def resolve_model_options(request: dict, profile: dict) -> tuple[bool, bool]:
@@ -104,7 +112,6 @@ def build_upstream_payload(
     supported_fields = {"model", "messages", "stream", "stream_options", "max_tokens", "max_completion_tokens", "tools", "tool_choice", "store", "shanghaitech", "conversation_id"}
     if set(request) - supported_fields:
         raise _invalid("unsupported_parameter", "The request contains an unsupported parameter.")
-    from .conversations import validate_conversation_id
     validate_conversation_id(request.get('conversation_id'))
     if "tools" in request and request["tools"] != []:
         raise _invalid("tools_not_supported", "This source supports text only. Disable DSH tools for this provider; tool calls are not silently discarded.")
@@ -190,7 +197,7 @@ def build_upstream_payload(
         "stream": True,
         "aiType": profile.get("upstream_model", model_id),
         "aiSecType": "1",
-        "chatGroupId": _new_conversation_id(),
+        "chatGroupId": new_conversation_id(),
         "promptTokens": 0,
         "imageUrl": "",
         "imageUrls": [],

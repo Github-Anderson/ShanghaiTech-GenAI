@@ -3,7 +3,8 @@ import json
 import unittest
 
 from gateway.protocol import GatewayError
-from gateway.tool_bridge import FINAL_TEXT_PREFIX, ToolBridge
+from gateway.tool_bridge import ToolBridge
+from gateway.tool_encoding import FINAL_TEXT_PREFIX
 
 
 TOOLS = [{'type': 'function', 'function': {'name': 'bash', 'parameters': {

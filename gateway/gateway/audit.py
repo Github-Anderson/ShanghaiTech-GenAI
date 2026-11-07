@@ -194,3 +194,15 @@ class AuditMiddleware:
             quiet = (row['method'] == 'GET' and row['path'] in audit.QUIET_PATHS) or (row['path'] == '/v1/admin/probe' and scope['state'].get('monitoring'))
             if not (quiet and row['outcome'] == 'complete'):
                 audit.add('request', row, model_request=bool(scope['state'].get('authorized')) and row['method'] == 'POST' and row['path'] == '/v1/chat/completions')
+
+
+def record_error(request, error):
+    row = getattr(request.state, 'audit', None)
+    if row is not None:
+        row.update(outcome='failed', error_code=error.code)
+    service = getattr(request.app.state, 'service', None)
+    if service and getattr(request.state, 'authorized', False) and request.url.path in ('/v1/credentials/import', '/v1/credentials/logout'):
+        service.audit.login('credential_import' if request.url.path.endswith('/import') else 'credential_logout', 'failed', error.code)
+    if service and error.code in ('upstream_authentication_required', 'upstream_login_required'):
+        service.last_probe = None
+        service.audit.login('credential_rejected', 'failed', error.code)

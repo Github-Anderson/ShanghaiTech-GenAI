@@ -17,11 +17,10 @@ import time
 import weakref
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-from urllib.parse import urlsplit
 
 import httpx
 
-from .protocol import GatewayError, MAX_INPUT_BYTES, _new_conversation_id
+from .protocol import GatewayError, new_conversation_id
 from .site_api import read_site_json
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
@@ -29,7 +28,6 @@ MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_FILES = 64
 FILE_TTL_SECONDS = 3600
 IMAGE_ORIGIN = "https://genaipic.shanghaitech.edu.cn"
-STATIC_PREFIX = IMAGE_ORIGIN + "//sys/common/static/"
 IMAGE_MIMES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
 # Document extensions accepted by the captured website file picker.
 DOCUMENT_MIMES = {'.pdf': 'application/pdf', '.txt': 'text/plain', '.csv': 'text/csv',
@@ -162,7 +160,7 @@ class Attachments:
 
     async def upload(self, client, models, model, filename, mime, data, token, image_token=None, *, chat_group_id=None, timing=None, image_base=IMAGE_ORIGIN + "/"):
         kind, _ = self.validate_file(filename, mime, data, model, models)
-        group = (chat_group_id or _new_conversation_id()) if kind == 'document' else ''
+        group = (chat_group_id or new_conversation_id()) if kind == 'document' else ''
         key = (hashlib.sha256(token.encode()).hexdigest(), model, group, mime, hashlib.sha256(data).hexdigest(), image_base)
         lock = self.upload_locks.get(key)
         if lock is None:
@@ -185,7 +183,7 @@ class Attachments:
             if timing:
                 timing.count('image_cache_hits')
             return self.get(self.image_cache[digest], model)
-        group = (chat_group_id or _new_conversation_id()) if kind == "document" else ""
+        group = (chat_group_id or new_conversation_id()) if kind == "document" else ""
         if kind == 'document' and chat_group_id:
             for existing in self.records.values():
                 if existing.kind == 'document' and existing.group == group:
@@ -322,11 +320,6 @@ class Attachments:
         if len({r.group for r in docs}) > 1:
             raise bad("Documents must be uploaded with the same conversation_id before being referenced together.")
         return rewritten, plan
-
-    @staticmethod
-    def mixed_text_mode(plan):
-        # Retained for older internal callers: documents now always use fileIds.
-        return False
 
     @staticmethod
     def mixed_native_mode(plan):

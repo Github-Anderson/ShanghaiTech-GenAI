@@ -9,7 +9,8 @@ from unittest.mock import patch
 
 import httpx
 
-from gateway.app import app, Service
+from gateway.app import app
+from gateway.service import Service
 from gateway.audit import AuditStore, AuditMiddleware, request_summary
 from gateway.settings import Settings
 from gateway.protocol import GatewayError

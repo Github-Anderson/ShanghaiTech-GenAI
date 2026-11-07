@@ -4,7 +4,7 @@ Verification describes recorded evidence, not a live upstream health check.
 """
 from .attachments import MAX_FILE_BYTES, MAX_IMAGE_BYTES, MAX_FILES, FILE_TTL_SECONDS, DOCUMENT_MIMES, IMAGE_MIMES
 from .conversations import TTL_SECONDS, MAX_CONVERSATIONS
-from .tool_bridge import MAX_ARGUMENT_JSON_DECODES, TAGGED_ARGUMENT_TYPES
+from .tool_encoding import MAX_ARGUMENT_JSON_DECODES, TAGGED_ARGUMENT_TYPES
 
 PROTOCOL_VERSION = '1.1'
 

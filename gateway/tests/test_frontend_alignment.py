@@ -13,7 +13,8 @@ from unittest.mock import patch
 import httpx
 from PIL import Image
 
-from gateway.app import Service, app
+from gateway.app import app
+from gateway.service import Service
 from gateway.attachments import Attachment, Attachments, DOCUMENT_MIMES, MAX_IMAGE_BYTES, compress_image
 from gateway.conversations import Conversations
 from gateway.protocol import GatewayError, build_upstream_payload, trim_history
@@ -147,6 +148,7 @@ class CatalogTests(unittest.IsolatedAsyncioTestCase):
                 return httpx.Response(200, json=data)
             async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as site:
                 service = Service(settings, site)
+                self.addCleanup(service.audit.close)
                 service.catalog.credentials = Credentials()
                 with patch.object(app.state, 'service', service, create=True):
                     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
@@ -224,6 +226,7 @@ class HistoryAndAttachmentTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             journal = Path(directory) / 'conversations.json'
             service = Service(Settings(Path('unused'), MODELS), None)
+            self.addCleanup(service.audit.close)
             service.credentials = Credentials()
             service.conversations = Conversations(journal)
             sent = []

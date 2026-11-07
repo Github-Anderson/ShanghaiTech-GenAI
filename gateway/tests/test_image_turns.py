@@ -8,13 +8,15 @@ from unittest.mock import patch
 
 import httpx
 
-from gateway.app import Service
-from gateway.attachments import Attachment, Attachments, STATIC_PREFIX
+from gateway.service import Service
+from gateway.attachments import Attachment, Attachments
 from gateway.protocol import GatewayError, build_upstream_payload
 from gateway.settings import Settings
 from gateway.tool_bridge import ToolBridge
 from gateway.upstream import stream_upstream
 
+
+STATIC_PREFIX = "https://genaipic.shanghaitech.edu.cn//sys/common/static/"
 
 MODELS = {'deepseek-pro': {'root_ai_type': 'xinference', 'max_tokens': 4096,
                            'supports_images': True}}
@@ -71,6 +73,7 @@ class ImageTurnTests(unittest.IsolatedAsyncioTestCase):
                 content='data: {"choices":[{"delta":{"content":"OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
         async with httpx.AsyncClient(transport=httpx.MockTransport(respond), timeout=0.01) as client:
             service = Service(settings, client)
+            self.addCleanup(service.audit.close)
             for images in [[], [STATIC_PREFIX + 'new.png']]:
                 events = [event async for event in service.generation_stream(
                     {'aiType': 'deepseek-pro', 'imageUrls': images}, 'xinference', 'synthetic-token')]
@@ -103,10 +106,11 @@ class ImageTurnTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(1)
             yield {'content': 'too late'}
         service = Service(settings, None)
-        with patch('gateway.app.stream_upstream', stalled):
+        self.addCleanup(service.audit.close)
+        with patch('gateway.service.stream_upstream', stalled):
             with self.assertRaises(GatewayError) as error:
                 async for _ in service.generate({'aiType': 'deepseek-pro', 'imageUrls': ['image']},
-                                                 'xinference', 'synthetic-token', None):
+                                                 'xinference', 'synthetic-token'):
                     pass
         self.assertEqual(error.exception.code, 'upstream_timeout')
         self.assertEqual(len(calls), 1)

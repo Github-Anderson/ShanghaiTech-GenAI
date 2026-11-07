@@ -5,7 +5,8 @@ from unittest.mock import Mock, patch
 
 import httpx
 
-from gateway.app import Service, app
+from gateway.app import app
+from gateway.service import Service
 from gateway.settings import Settings
 from gateway.tool_bridge import ToolBridge
 
