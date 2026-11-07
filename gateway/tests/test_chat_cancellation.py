@@ -9,7 +9,6 @@ from gateway.app import app
 from gateway.service import Service
 from gateway.settings import Settings
 
-
 KEY = "synthetic-gateway-key-" * 2
 MODELS = {"deepseek-pro": {"root_ai_type": "xinference", "max_tokens": 4096}}
 
@@ -32,9 +31,14 @@ class ChatCancellationTests(unittest.IsolatedAsyncioTestCase):
         existing_tasks = asyncio.all_tasks()
         started, closed, sent_text = asyncio.Event(), asyncio.Event(), asyncio.Event()
         incoming = asyncio.Queue()
-        body = json.dumps({"model": "deepseek-pro", "stream": stream,
-                           "conversation_id": "cancel-test", "messages": [
-                               {"role": "user", "content": "Question"}]}).encode()
+        body = json.dumps(
+            {
+                "model": "deepseek-pro",
+                "stream": stream,
+                "conversation_id": "cancel-test",
+                "messages": [{"role": "user", "content": "Question"}],
+            }
+        ).encode()
         incoming.put_nowait({"type": "http.request", "body": body, "more_body": False})
         sent = []
 
@@ -52,13 +56,23 @@ class ChatCancellationTests(unittest.IsolatedAsyncioTestCase):
             if message["type"] == "http.response.body" and b"partial" in message.get("body", b""):
                 sent_text.set()
 
-        scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"},
-                 "http_version": "1.1", "method": "POST", "scheme": "http",
-                 "path": "/v1/chat/completions", "raw_path": b"/v1/chat/completions",
-                 "query_string": b"", "root_path": "", "server": ("test", 80),
-                 "client": ("127.0.0.1", 12345),
-                 "headers": [(b"authorization", ("Bearer " + KEY).encode()),
-                             (b"content-type", b"application/json")]}
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/v1/chat/completions",
+            "raw_path": b"/v1/chat/completions",
+            "query_string": b"",
+            "root_path": "",
+            "server": ("test", 80),
+            "client": ("127.0.0.1", 12345),
+            "headers": [
+                (b"authorization", ("Bearer " + KEY).encode()),
+                (b"content-type", b"application/json"),
+            ],
+        }
         try:
             with patch.object(self.service, "generation_stream", upstream):
                 request = asyncio.create_task(app(scope, incoming.get, send))
@@ -75,9 +89,13 @@ class ChatCancellationTests(unittest.IsolatedAsyncioTestCase):
                     request.result()
                 self.assertTrue(closed.is_set())
                 self.assertEqual((self.service.pending, self.service.running), (0, 0))
-                self.assertFalse(any(lock.locked() for lock in self.service.conversations.locks.values()))
+                self.assertFalse(
+                    any(lock.locked() for lock in self.service.conversations.locks.values())
+                )
                 self.assertEqual(self.service.audit.active, {})
-                self.assertEqual(self.service.audit.rows("request")["items"][0]["outcome"], "cancelled")
+                self.assertEqual(
+                    self.service.audit.rows("request")["items"][0]["outcome"], "cancelled"
+                )
                 self.assertFalse(any(b"[DONE]" in m.get("body", b"") for m in sent))
                 await asyncio.sleep(0)
                 self.assertEqual(asyncio.all_tasks() - existing_tasks, set())
