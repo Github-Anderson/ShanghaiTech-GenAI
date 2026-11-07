@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
-# ShanghaiTech GenAI v1.1.1
+# ShanghaiTech GenAI v1.1.2
 exec python3 "$(dirname "$0")/tools/local-macos.py" gateway "$@"

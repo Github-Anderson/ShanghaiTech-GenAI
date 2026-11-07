@@ -1,4 +1,5 @@
 """Request-local monotonic image timings; no prompts, paths or credentials."""
+
 import json
 import logging
 import secrets
@@ -25,8 +26,11 @@ class ImageTimings:
         self.values[key] = self.values.get(key, 0) + amount
 
     def snapshot(self):
-        return {'request_id': self.request_id, 'unit': 'ms',
-                **{key: round(value, 3) for key, value in self.values.items()}}
+        return {
+            "request_id": self.request_id,
+            "unit": "ms",
+            **{key: round(value, 3) for key, value in self.values.items()},
+        }
 
 
 async def timed_output(events, timing):
@@ -37,21 +41,24 @@ async def timed_output(events, timing):
         finally:
             await events.aclose()
         return
-    outcome = 'cancelled'
+    outcome = "cancelled"
     try:
         async for event in events:
-            if event.get('content') and 'gateway_first_text_ms' not in timing.values:
-                timing.elapsed('gateway_first_text_ms', timing.started)
-            if event.get('finish_reason'):
-                outcome = 'complete'
-                timing.elapsed('gateway_total_ms', timing.started)
-                yield {'timings': timing.snapshot()}
+            if event.get("content") and "gateway_first_text_ms" not in timing.values:
+                timing.elapsed("gateway_first_text_ms", timing.started)
+            if event.get("finish_reason"):
+                outcome = "complete"
+                timing.elapsed("gateway_total_ms", timing.started)
+                yield {"timings": timing.snapshot()}
             yield event
     except Exception:
-        outcome = 'failed'
+        outcome = "failed"
         raise
     finally:
-        timing.elapsed('gateway_total_ms', timing.started)
-        logger.info('image_request_timing outcome=%s %s', outcome,
-                    json.dumps(timing.snapshot(), separators=(',', ':')))
+        timing.elapsed("gateway_total_ms", timing.started)
+        logger.info(
+            "image_request_timing outcome=%s %s",
+            outcome,
+            json.dumps(timing.snapshot(), separators=(",", ":")),
+        )
         await events.aclose()

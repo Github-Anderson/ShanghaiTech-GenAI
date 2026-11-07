@@ -3,7 +3,7 @@ services:
   gateway:
     build:
       context: ./gateway
-    image: shanghaitech-genai:${GENAI_IMAGE_TAG:-1.1.1}
+    image: shanghaitech-genai:${GENAI_IMAGE_TAG:-1.1.2}
     init: true
     restart: unless-stopped
     environment:

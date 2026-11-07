@@ -1,4 +1,5 @@
 """Configuration contains file paths, never captured credential values."""
+
 from __future__ import annotations
 
 import json
@@ -34,19 +35,31 @@ def load_settings() -> Settings:
         if not isinstance(data, dict):
             raise ValueError()
         paths = {}
-        imported = os.environ.get('IMPORTED_CREDENTIALS_FILE') or data.get('imported_credentials_file', 'browser-credentials/credentials.json')
+        imported = os.environ.get("IMPORTED_CREDENTIALS_FILE") or data.get(
+            "imported_credentials_file", "browser-credentials/credentials.json"
+        )
         if not isinstance(imported, str) or not imported.strip():
             raise ValueError()
         imported_path = Path(imported).expanduser()
-        paths['imported_credentials_file'] = imported_path if imported_path.is_absolute() else config_path.resolve().parent / imported_path
-        signing = os.environ.get('SITE_SIGNING_FILE') or data.get('site_signing_file')
+        paths["imported_credentials_file"] = (
+            imported_path
+            if imported_path.is_absolute()
+            else config_path.resolve().parent / imported_path
+        )
+        signing = os.environ.get("SITE_SIGNING_FILE") or data.get("site_signing_file")
         if signing is None:
-            paths['site_signing_file'] = paths['imported_credentials_file'].with_name('site-signing.json')
+            paths["site_signing_file"] = paths["imported_credentials_file"].with_name(
+                "site-signing.json"
+            )
         else:
             if not isinstance(signing, str) or not signing.strip():
                 raise ValueError()
             signing_path = Path(signing).expanduser()
-            paths['site_signing_file'] = signing_path if signing_path.is_absolute() else config_path.resolve().parent / signing_path
+            paths["site_signing_file"] = (
+                signing_path
+                if signing_path.is_absolute()
+                else config_path.resolve().parent / signing_path
+            )
         for key, env in [("gateway_key_file", "GATEWAY_KEY_FILE")]:
             value = os.environ.get(env) or data.get(key)
             if not isinstance(value, str) or not value.strip():
@@ -64,7 +77,12 @@ def load_settings() -> Settings:
                 raise ValueError()
             models[name] = {"enabled": profile.get("enabled", True)}
         options = {}
-        for key, value in [("connect_timeout_seconds", 10), ("read_timeout_seconds", 90), ("total_timeout_seconds", 300), ("queue_timeout_seconds", 30)]:
+        for key, value in [
+            ("connect_timeout_seconds", 10),
+            ("read_timeout_seconds", 90),
+            ("total_timeout_seconds", 300),
+            ("queue_timeout_seconds", 30),
+        ]:
             number = data.get(key, value)
             if type(number) not in {int, float} or not 0 < number <= 3600:
                 raise ValueError()
@@ -75,17 +93,35 @@ def load_settings() -> Settings:
         concurrent = data.get("max_concurrent_requests", 1)
         if type(concurrent) is not int or not 1 <= concurrent <= 4:
             raise ValueError()
-        proxy = data.get('upstream_proxy_url')
+        proxy = data.get("upstream_proxy_url")
         if proxy is not None:
             if not isinstance(proxy, str) or not proxy.strip():
                 raise ValueError()
             proxy = proxy.strip()
             parsed = urlsplit(proxy)
             _ = parsed.port
-            if (parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password
-                    or parsed.query or parsed.fragment or parsed.path not in ('', '/')):
+            if (
+                parsed.scheme not in ("http", "https")
+                or not parsed.hostname
+                or parsed.username
+                or parsed.password
+                or parsed.query
+                or parsed.fragment
+                or parsed.path not in ("", "/")
+            ):
                 raise ValueError()
-        return Settings(**paths, dynamic_site_config=True, upstream_proxy_url=proxy, models=models, max_waiting_requests=waiting,
-                        max_concurrent_requests=concurrent, **options)
+        return Settings(
+            **paths,
+            dynamic_site_config=True,
+            upstream_proxy_url=proxy,
+            models=models,
+            max_waiting_requests=waiting,
+            max_concurrent_requests=concurrent,
+            **options,
+        )
     except (OSError, ValueError, TypeError, KeyError):
-        raise GatewayError(503, "configuration_required", "Create config/local.json using the example and configure protected file paths.") from None
+        raise GatewayError(
+            503,
+            "configuration_required",
+            "Create config/local.json using the example and configure protected file paths.",
+        ) from None

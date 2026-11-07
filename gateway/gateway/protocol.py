@@ -11,7 +11,6 @@ import json
 import secrets
 from typing import Any
 
-
 MAX_INPUT_BYTES = 1024 * 1024
 
 # Public random-ID alphabet from the captured e1bd JavaScript module (E251).
@@ -26,7 +25,9 @@ class GatewayError(Exception):
     with exception text, upstream response bodies, headers, or credentials.
     """
 
-    def __init__(self, status_code: int, code: str, message: str, *, retryable: bool = False) -> None:
+    def __init__(
+        self, status_code: int, code: str, message: str, *, retryable: bool = False
+    ) -> None:
         self.status_code = status_code
         self.code = code
         self.message = message
@@ -39,9 +40,23 @@ def _invalid(code: str, message: str) -> GatewayError:
     return GatewayError(400, code, message)
 
 
-def _new_conversation_id() -> str:
+def new_conversation_id() -> str:
     # The browser indexes 21 random bytes in reverse using byte & 63.
     return "".join(_ID_ALPHABET[value & 63] for value in reversed(secrets.token_bytes(21)))
+
+
+def validate_conversation_id(value):
+    if value is not None and (
+        not isinstance(value, str)
+        or not 1 <= len(value) <= 128
+        or any(ord(c) < 33 or ord(c) > 126 for c in value)
+    ):
+        raise GatewayError(
+            400,
+            "invalid_conversation_id",
+            "conversation_id must contain 1 to 128 visible ASCII characters.",
+        )
+    return value
 
 
 def resolve_model_options(request: dict, profile: dict) -> tuple[bool, bool]:
@@ -49,33 +64,46 @@ def resolve_model_options(request: dict, profile: dict) -> tuple[bool, bool]:
 
     Partial option objects inherit configured defaults.
     """
-    search = profile.get('net_go', False)
-    thinking = profile.get('thinking', False)
+    search = profile.get("net_go", False)
+    thinking = profile.get("thinking", False)
     if type(search) is not bool or type(thinking) is not bool:
-        raise GatewayError(503, 'configuration_error', 'Model option defaults must be boolean.')
-    if 'shanghaitech' in request:
-        options = request['shanghaitech']
-        if not isinstance(options, dict) or set(options) - {'search', 'thinking'} or any(type(v) is not bool for v in options.values()):
-            raise _invalid('invalid_model_options', 'shanghaitech accepts only boolean search and thinking fields.')
-        search = options.get('search', search)
-        thinking = options.get('thinking', thinking)
-    if search and not profile.get('supports_search', False):
-        raise _invalid('search_not_supported', 'Search is not enabled for this model.')
-    if thinking and not profile.get('supports_thinking', False):
-        raise _invalid('thinking_not_supported', 'Thinking is not enabled for this model.')
-    if thinking and not profile.get('enable_thinking', False):
-        raise GatewayError(503, 'configuration_error', 'The model has no configured Thinking transport.')
+        raise GatewayError(503, "configuration_error", "Model option defaults must be boolean.")
+    if "shanghaitech" in request:
+        options = request["shanghaitech"]
+        if (
+            not isinstance(options, dict)
+            or set(options) - {"search", "thinking"}
+            or any(type(v) is not bool for v in options.values())
+        ):
+            raise _invalid(
+                "invalid_model_options",
+                "shanghaitech accepts only boolean search and thinking fields.",
+            )
+        search = options.get("search", search)
+        thinking = options.get("thinking", thinking)
+    if search and not profile.get("supports_search", False):
+        raise _invalid("search_not_supported", "Search is not enabled for this model.")
+    if thinking and not profile.get("supports_thinking", False):
+        raise _invalid("thinking_not_supported", "Thinking is not enabled for this model.")
+    if thinking and not profile.get("enable_thinking", False):
+        raise GatewayError(
+            503, "configuration_error", "The model has no configured Thinking transport."
+        )
     return search, thinking
 
 
 def trim_history(request: dict, message_round: int = 30) -> dict:
     """The current turn and leading system prompt are outside the history window."""
-    messages = request.get('messages')
+    messages = request.get("messages")
     if not isinstance(messages, list) or not messages or message_round <= 0:
         return request
-    system = messages[:1] if isinstance(messages[0], dict) and messages[0].get('role') == 'system' else []
-    history = messages[len(system):-1]
-    return {**request, 'messages': system + history[-2 * message_round:] + messages[-1:]}
+    system = (
+        messages[:1]
+        if isinstance(messages[0], dict) and messages[0].get("role") == "system"
+        else []
+    )
+    history = messages[len(system) : -1]
+    return {**request, "messages": system + history[-2 * message_round :] + messages[-1:]}
 
 
 def build_upstream_payload(
@@ -93,25 +121,42 @@ def build_upstream_payload(
         raise _invalid("invalid_request", "The request must be a JSON object.")
 
     try:
-        encoded_size = len(
-            json.dumps(request, ensure_ascii=False, allow_nan=False).encode("utf-8")
-        )
+        encoded_size = len(json.dumps(request, ensure_ascii=False, allow_nan=False).encode("utf-8"))
     except (TypeError, ValueError, UnicodeError):
         raise _invalid("invalid_request", "The request must contain valid UTF-8 JSON.") from None
     if encoded_size > MAX_INPUT_BYTES:
         raise GatewayError(413, "request_too_large", "The request exceeds the demo input limit.")
 
-    supported_fields = {"model", "messages", "stream", "stream_options", "max_tokens", "max_completion_tokens", "tools", "tool_choice", "store", "shanghaitech", "conversation_id"}
+    supported_fields = {
+        "model",
+        "messages",
+        "stream",
+        "stream_options",
+        "max_tokens",
+        "max_completion_tokens",
+        "tools",
+        "tool_choice",
+        "store",
+        "shanghaitech",
+        "conversation_id",
+    }
     if set(request) - supported_fields:
         raise _invalid("unsupported_parameter", "The request contains an unsupported parameter.")
-    from .conversations import validate_conversation_id
-    validate_conversation_id(request.get('conversation_id'))
+    validate_conversation_id(request.get("conversation_id"))
     if "tools" in request and request["tools"] != []:
-        raise _invalid("tools_not_supported", "This source supports text only. Disable DSH tools for this provider; tool calls are not silently discarded.")
+        raise _invalid(
+            "tools_not_supported",
+            "This source supports text only. Disable DSH tools for this provider; tool calls are not silently discarded.",
+        )
     if "tool_choice" in request and request["tool_choice"] != "none":
-        raise _invalid("tools_not_supported", "Only tool_choice=none is supported by this text-only source.")
+        raise _invalid(
+            "tools_not_supported", "Only tool_choice=none is supported by this text-only source."
+        )
     if "store" in request and request["store"] is not False:
-        raise _invalid("store_not_supported", "Only store=false is accepted. The upstream website may retain its own chat history.")
+        raise _invalid(
+            "store_not_supported",
+            "Only store=false is accepted. The upstream website may retain its own chat history.",
+        )
     if "max_tokens" in request and "max_completion_tokens" in request:
         raise _invalid("invalid_token_limit", "Specify only one output limit field.")
 
@@ -139,7 +184,7 @@ def build_upstream_payload(
     messages = request.get("messages")
     if not isinstance(messages, list) or not messages:
         raise _invalid("invalid_messages", "Messages must be a nonempty array of text messages.")
-    messages = trim_history(request, message_round)['messages']
+    messages = trim_history(request, message_round)["messages"]
 
     normalized: list[dict[str, str]] = []
     for index, message in enumerate(messages):
@@ -151,15 +196,29 @@ def build_upstream_payload(
         role = message.get("role")
         content = message.get("content")
         if role not in ("user", "assistant", "system"):
-            raise _invalid("unsupported_role", "Only user, assistant, and initial system roles are supported.")
+            raise _invalid(
+                "unsupported_role", "Only user, assistant, and initial system roles are supported."
+            )
         if role == "system" and index != 0:
-            raise _invalid("invalid_system_message", "A system message is allowed only as the first message.")
+            raise _invalid(
+                "invalid_system_message", "A system message is allowed only as the first message."
+            )
         if isinstance(content, list):
-            if not content or not all(isinstance(part, dict) and set(part) == {"type", "text"} and part.get("type") == "text" and isinstance(part.get("text"), str) for part in content):
-                raise _invalid("unsupported_content", "Only plain text content blocks are supported.")
+            if not content or not all(
+                isinstance(part, dict)
+                and set(part) == {"type", "text"}
+                and part.get("type") == "text"
+                and isinstance(part.get("text"), str)
+                for part in content
+            ):
+                raise _invalid(
+                    "unsupported_content", "Only plain text content blocks are supported."
+                )
             content = "\n".join(part["text"] for part in content)
         if not isinstance(content, str) or not content.strip():
-            raise _invalid("invalid_content", "Message content must be a nonempty plain-text string.")
+            raise _invalid(
+                "invalid_content", "Message content must be a nonempty plain-text string."
+            )
         normalized.append({"role": role, "content": content})
 
     if normalized[-1]["role"] != "user":
@@ -167,7 +226,9 @@ def build_upstream_payload(
 
     profile = models[model_id]
     if not isinstance(profile, dict):
-        raise GatewayError(503, "configuration_error", "The selected model profile is not configured correctly.")
+        raise GatewayError(
+            503, "configuration_error", "The selected model profile is not configured correctly."
+        )
     root_ai_type = profile.get("root_ai_type")
     max_tokens = profile.get("max_tokens")
     enable_thinking = profile.get("enable_thinking", False)
@@ -177,11 +238,16 @@ def build_upstream_payload(
         or max_tokens <= 0
         or not isinstance(enable_thinking, bool)
     ):
-        raise GatewayError(503, "configuration_error", "The selected model profile is not configured correctly.")
+        raise GatewayError(
+            503, "configuration_error", "The selected model profile is not configured correctly."
+        )
 
     requested_limit = request.get("max_tokens", request.get("max_completion_tokens", max_tokens))
     if type(requested_limit) is not int or not 1 <= requested_limit <= max_tokens:
-        raise _invalid("invalid_token_limit", "The output limit must be a positive integer within the configured model limit.")
+        raise _invalid(
+            "invalid_token_limit",
+            "The output limit must be a positive integer within the configured model limit.",
+        )
     search, thinking = resolve_model_options(request, profile)
     payload: dict[str, Any] = {
         "chatInfo": normalized[-1]["content"],
@@ -190,7 +256,7 @@ def build_upstream_payload(
         "stream": True,
         "aiType": profile.get("upstream_model", model_id),
         "aiSecType": "1",
-        "chatGroupId": _new_conversation_id(),
+        "chatGroupId": new_conversation_id(),
         "promptTokens": 0,
         "imageUrl": "",
         "imageUrls": [],
@@ -220,9 +286,7 @@ def make_chunk(
         "object": "chat.completion.chunk",
         "created": created,
         "model": model,
-        "choices": [
-            {"index": 0, "delta": dict(delta), "finish_reason": finish_reason}
-        ],
+        "choices": [{"index": 0, "delta": dict(delta), "finish_reason": finish_reason}],
     }
 
 

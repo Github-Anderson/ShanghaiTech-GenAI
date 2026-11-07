@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import httpx
 
-from gateway.app import Service, delete_conversations
+from gateway.service import Service, delete_conversations
 from gateway.conversations import Conversations
 from gateway.protocol import GatewayError, build_upstream_payload
 from gateway.settings import load_settings
@@ -143,7 +143,7 @@ async def fault_case(settings, client, raw, label, model='deepseek-pro'):
             async for event in stream_upstream(client, payload, root, token, **kwargs):
                 yield event
     try:
-        with patch('gateway.app.stream_upstream', injected):
+        with patch('gateway.service.stream_upstream', injected):
             events = [event async for event in service.events(payload, config.models[model]['root_ai_type'],
                        public_model=model, conversation_id=local_id, bridge=bridge, config=config)]
         require(len(attempts) == 2 and len(upstream_calls) == 1, 'Expected one real correction request')
